@@ -170,3 +170,7 @@ body { font-family: var(--f-body); }
 .roster th, .roster td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .roster th { color: var(--muted); font-size: 12px; }
 .roster select { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.pw { position: relative; }
+.pw input { padding-right: 44px; }
+.pw .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 6px; }
+.pw .eye:hover { color: var(--accent); background: var(--accent-soft); }

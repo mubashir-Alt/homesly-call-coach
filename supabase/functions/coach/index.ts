@@ -316,7 +316,7 @@ Give a score from 0 to 100, a one-sentence verdict, what worked (under 20 words)
         await bumpUsage(admin, user.id, today);
         const lines = rows.map((a) => `- ${a.kind} "${a.title}": score ${a.score}. ${a.summary ?? ""} Fixes: ${(a.improvements ?? []).join(" | ")}`).join("\n");
         const note = await askText(COACH_SYSTEM,
-          [{ role: "user", content: `Write today's coaching summary for the trainee, addressed to them as "you", under 120 words. Use this structure: one sentence on how today went; "Keep doing:" one point; "Fix next:" two points; "Practise this line tomorrow:" one exact sentence they can say on calls. Base it only on these results:\n${lines}` }],
+          [{ role: "user", content: `Write today's coaching summary for the trainee, addressed to them as "you", under 120 words, in plain text with no markdown symbols (no asterisks, hashes or headings). Use this structure: one sentence on how today went; "Keep doing:" one point; "Fix next:" two points; "Practise this line tomorrow:" one exact sentence they can say on calls. Base it only on these results:\n${lines}` }],
           "low");
         const { error } = await admin.from("day_notes").upsert({ user_id: user.id, day: today, note });
         if (error) throw new HttpError(500, "The summary could not be saved.");

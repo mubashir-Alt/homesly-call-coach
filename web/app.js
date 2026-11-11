@@ -5,6 +5,22 @@ const CFG = window.HOMESLY_CONFIG || {};
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const tone = (s) => (s >= 80 ? "good" : s >= 60 ? "warn" : "bad");
+// Coaching notes: escape, then turn **bold** into <strong> and drop stray markdown symbols.
+const noteHtml = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/^#+\s*/gm, "").replace(/\*\*/g, "");
+// Password input with a show/hide eye button.
+const EYE = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/></svg>';
+const pwField = (id, label, auto, min) => `<div class="field"><label for="${id}">${label}</label><div class="pw"><input id="${id}" type="password" autocomplete="${auto}" ${min ? `minlength="${min}"` : ""} required><button type="button" class="eye" data-eye="${id}" aria-label="Show password" aria-pressed="false">${EYE}</button></div></div>`;
+function bindEyes(root) {
+  root.querySelectorAll("[data-eye]").forEach((b) => (b.onclick = () => {
+    const input = document.getElementById(b.dataset.eye), show = input.type === "password";
+    input.type = show ? "text" : "password";
+    b.innerHTML = show ? EYE_OFF : EYE;
+    b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    b.setAttribute("aria-pressed", String(show));
+    input.focus();
+  }));
+}
 const store = {
   get(k, d) { try { const v = localStorage.getItem("hcc." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("hcc." + k, JSON.stringify(v)); } catch { /* private mode */ } },
@@ -142,8 +158,9 @@ function renderAuth(mode) {
   const app = $("#app");
   if (mode === "reset") {
     app.innerHTML = `<div class="auth"><p class="eyebrow">Homesly Call Coach</p><h1>Set a new password</h1><div class="panel">
-      <form id="resetForm"><div class="field"><label for="np">New password (8+ characters)</label><input id="np" type="password" minlength="8" autocomplete="new-password" required></div>
+      <form id="resetForm">${pwField("np", "New password (8+ characters)", "new-password", 8)}
       <button class="btn primary" type="submit">Save password</button><p class="msg" id="m"></p></form></div></div>`;
+    bindEyes(app);
     $("#resetForm").onsubmit = async (e) => {
       e.preventDefault();
       const { error } = await S.sb.auth.updateUser({ password: $("#np").value });
@@ -156,16 +173,17 @@ function renderAuth(mode) {
   let form = "";
   if (mode === "signin") form = `<form id="f">
       <div class="field"><label for="em">Work email</label><input id="em" type="email" autocomplete="email" required></div>
-      <div class="field"><label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" required></div>
+      ${pwField("pw", "Password", "current-password")}
       <button class="btn primary" type="submit" style="width:100%">Sign in</button>
       <p class="msg"><button type="button" class="linkbtn" id="forgot">Forgot password?</button></p><p class="msg" id="m"></p></form>`;
   if (mode === "signup") form = `<form id="f">
       <div class="field"><label for="fn">Your name</label><input id="fn" autocomplete="name" required></div>
       <div class="field"><label for="em">Work email (@homeslystays.com)</label><input id="em" type="email" autocomplete="email" required></div>
-      <div class="field"><label for="pw">Password (8+ characters)</label><input id="pw" type="password" minlength="8" autocomplete="new-password" required></div>
+      ${pwField("pw", "Password (8+ characters)", "new-password", 8)}
       <button class="btn primary" type="submit" style="width:100%">Create account</button><p class="msg" id="m"></p></form>`;
   app.innerHTML = `<div class="auth"><p class="eyebrow">Homesly</p><h1>Call Coach</h1><p class="muted">Daily AI role-play practice for the reservations and support teams.</p><div class="panel">${tabs}${form}</div></div>`;
   app.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => renderAuth(b.dataset.m)));
+  bindEyes(app);
   const m = $("#m");
   const say = (t, ok) => { m.className = "msg " + (ok ? "ok" : "err"); m.textContent = t; };
   $("#f").onsubmit = async (e) => {
@@ -277,7 +295,7 @@ function renderToday(app) {
     return `<li class="item ${b ? "done" : ""}"><span class="n">${b ? "✓" : i + 1}</span><div><h3>${esc(r.title)}</h3><p>${sub}</p><div class="tags">${chips}</div></div><div>${right}</div></li>`;
   }).join("") + "</ol>";
   if (todays.length) {
-    html += `<div class="panel"><h3>Today's coaching summary</h3>${S.dayNote ? `<p style="white-space:pre-wrap;margin:0">${esc(S.dayNote)}</p>` : `<p class="muted" style="margin:0 0 10px">A short summary of today: what improved, what to fix, and one line to practise tomorrow.</p><button class="btn" id="gennote">Write today's summary</button><p class="msg" id="notemsg"></p>`}</div><div style="height:14px"></div>`;
+    html += `<div class="panel"><h3>Today's coaching summary</h3>${S.dayNote ? `<p style="white-space:pre-wrap;margin:0">${noteHtml(S.dayNote)}</p>` : `<p class="muted" style="margin:0 0 10px">A short summary of today: what improved, what to fix, and one line to practise tomorrow.</p><button class="btn" id="gennote">Write today's summary</button><p class="msg" id="notemsg"></p>`}</div><div style="height:14px"></div>`;
   }
   html += `<details class="lib"><summary>Practise anything else (${p.roleplays.length} calls, ${p.drills.length} drills)</summary><div class="libgrid">` +
     p.roleplays.map((r) => `<button data-start="roleplay:${esc(r.id)}"><strong>${esc(r.title)}</strong><small>Call · ${esc(r.hotel)} · ${esc(r.scenario)}</small></button>`).join("") +
@@ -561,7 +579,7 @@ async function openPerson(id) {
     const [list, note] = await Promise.all([loadAttempts(id), loadNote(id, S.today)]);
     if (S.view !== "team" || S.team.sel !== id) return;
     const p = S.team.people.find((x) => x.id === id);
-    const intro = note ? `<div class="focus"><p class="eyebrow">Today's coaching summary</p><p style="white-space:pre-wrap">${esc(note)}</p></div>` : "";
+    const intro = note ? `<div class="focus"><p class="eyebrow">Today's coaching summary</p><p style="white-space:pre-wrap">${noteHtml(note)}</p></div>` : "";
     const holder = document.createElement("div");
     renderProgress(holder, list, (p?.full_name || p?.email || "Trainee") + ": progress", intro);
     box.innerHTML = '<div style="height:18px"></div>'; box.appendChild(holder);
