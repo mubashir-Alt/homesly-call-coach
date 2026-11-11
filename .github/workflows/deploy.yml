@@ -48,7 +48,7 @@ jobs:
 
       - name: Apply database changes
         if: steps.cfg.outputs.ready == 'true'
-        run: supabase db push --remote
+        run: supabase db push --remote --yes
 
       - name: Set AI secrets
         if: steps.cfg.outputs.ready == 'true'
