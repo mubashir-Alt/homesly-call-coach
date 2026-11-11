@@ -2,7 +2,7 @@
 
 Daily AI role-play practice for Homesly's reservations team, with a customer support pack ready to fill.
 
-**Live app:** https://mubashir-alt.github.io/homesly-call-coach/ · **First-time setup:** [SETUP.md](SETUP.md)
+**Live app:** https://mubashir-alt.github.io/homesly-call-coach/ · **First-time setup:** [SETUP.md](SETUP.md) · **Backend handover (Supabase or AWS):** [HANDOVER.md](HANDOVER.md)
 
 ## What it does
 
