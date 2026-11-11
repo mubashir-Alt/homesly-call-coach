@@ -118,6 +118,18 @@ $$;
 create trigger profiles_protect before update on public.profiles
   for each row execute function public.protect_profile();
 
+-- Explicit privileges (works whether or not "Automatically expose new tables" is on).
+-- Row-level security below decides which rows each person can actually see.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to service_role;
+grant select, update on public.app_settings to authenticated;
+grant select, update on public.profiles to authenticated;
+grant select, delete on public.attempts to authenticated;
+grant select on public.day_notes to authenticated;
+grant select on public.ai_usage to authenticated;
+grant execute on function public.is_manager() to authenticated, service_role;
+grant execute on function public.bump_ai_usage(uuid, date) to service_role;
+
 -- Row level security -------------------------------------------------------
 alter table public.app_settings enable row level security;
 alter table public.profiles enable row level security;
