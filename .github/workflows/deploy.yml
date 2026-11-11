@@ -54,17 +54,17 @@ jobs:
         if: steps.cfg.outputs.ready == 'true'
         run: |
           if [ -n "$ANTHROPIC_API_KEY" ]; then
-            supabase secrets set --project-ref "$PROJECT_REF" ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+            supabase secrets set --remote="$PROJECT_REF" --yes ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
           else
             echo "::warning::ANTHROPIC_API_KEY secret is not set. The app will load but practice calls won't work."
           fi
           if [ -n "$COACH_MODEL" ]; then
-            supabase secrets set --project-ref "$PROJECT_REF" COACH_MODEL="$COACH_MODEL"
+            supabase secrets set --remote="$PROJECT_REF" --yes COACH_MODEL="$COACH_MODEL"
           fi
 
       - name: Deploy function
         if: steps.cfg.outputs.ready == 'true'
-        run: supabase functions deploy coach --project-ref "$PROJECT_REF"
+        run: supabase functions deploy coach --remote="$PROJECT_REF" --yes
 
   site:
     name: Website (GitHub Pages)
