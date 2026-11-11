@@ -4,6 +4,13 @@
 
 ---
 
+## Version 2 (academy redesign)
+- **Course with 6 levels** (Foundations → Booking basics → Objections → Payments & privacy → Hotel facts → Hard calls). Pass every lesson in a level (75+) to earn its badge and unlock the next. Levels are set in `levels` in `packs/sales.ts`.
+- **The AI speaks first** on every lesson: the guest picks up the phone (outbound) or opens the call (inbound).
+- **Unique scenarios:** `start` generates a fresh variant per trainee (new guest name, dates, prices ±10%, persona detail, twist and opening line; drills get a reworded guest line). Variants live in `scenario_variants` (unique per lesson + signature, server-only) and are never served to two people. "Retry same scenario" replays your own variant.
+- **Attendance:** `attendance` table (daily check-in at app open) + sessions per day → Goal met (≥3), Practised (1–2), Logged in, Absent. Calendar per person; 14-day grid and 7-day rate for the team.
+- **Charts:** daily average bars, average by level, Core Rules bars; team performance bars and KPI tiles.
+
 ## 1. At a glance
 
 | What | Where |

@@ -6,6 +6,9 @@ Daily AI role-play practice for Homesly's reservations team, with a customer sup
 
 ## What it does
 
+**Academy layout:** a 6-level course (pass 75+ to unlock the next level and earn a badge), the AI guest always speaks first, every attempt is a fresh scenario unique to that trainee, plus attendance calendars and performance charts for each trainee and for the team.
+
+
 - **Practice calls.** The AI plays a guest built from real recorded calls: "needs to ask my husband", "is this a scam?", the guest who starts reading out a card, parking for a partner who can't walk far, wrong numbers, complaints and more. Trainees speak or type. With **Hands-free** on, the guest talks back aloud and the reply sends when the trainee pauses.
 - **Quick drills.** One real moment from a recorded call: what the guest said, and what was said back. The trainee gives a better reply.
 - **Scoring against the Homesly Core Rules.** Opening and recorded line, right person, live prices only, no card by phone, dates with weekday, facts from the knowledge base, no freebies, objections, next step, close, clarity. Each session gets a score out of 100, every rule marked Met / Partly / Missed, and "say it better" rewrites of the trainee's own lines.

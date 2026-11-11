@@ -12,7 +12,10 @@ const pack: Pack = {
   id: "support",
   name: "Customer support",
   description: "Existing bookings, changes, complaints and in-stay problems.",
+  passMark: 75,
+  dailyGoal: 3,
   knowledgeBase: {},
+  levels: [],
   criteria: [
     { id: "greeting", label: "Greeting", tip: "Say your name and the hotel, mention the call is recorded, and ask how you can help." },
     { id: "verification", label: "Verification", tip: "Confirm the guest's name and booking reference before discussing or changing any booking." },
