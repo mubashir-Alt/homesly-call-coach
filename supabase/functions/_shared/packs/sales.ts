@@ -14,6 +14,8 @@ const pack: Pack = {
   id: "sales",
   name: "Sales & reservations",
   description: "Abandoned bookings, enquiries and callbacks for Homesly hotels.",
+  staffRole: "reservations agent",
+  systemLabel: "Live system",
   passMark: 75,
   dailyGoal: 3,
   levels: [

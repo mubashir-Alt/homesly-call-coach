@@ -65,6 +65,7 @@ const pack = () => S.packs.find((p) => p.id === S.packId) || S.packs[0];
 const lessonById = (id) => pack().lessons.find((l) => l.id === id);
 const crit = (id) => pack()?.criteria.find((c) => c.id === id) || { id, label: id, tip: "" };
 const isManager = () => S.profile?.role === "manager";
+const trackShort = (p) => (p.id === "support" ? "Support" : "Sales");
 
 /* ---------- Backend ---------- */
 async function api(action, payload = {}) {
@@ -72,7 +73,7 @@ async function api(action, payload = {}) {
   if (error) {
     let msg = "Something went wrong. Try again.";
     try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch { /* network */ }
-    if (error.name === "FunctionsFetchError") msg = "Can't reach the server. Check your internet connection.";
+    if (error.name === "FunctionsFetchError") { const e = new Error("Can't reach the server. Check your internet connection, then try again."); e.network = true; throw e; }
     throw new Error(msg);
   }
   return data;
@@ -199,11 +200,14 @@ async function startApp() {
   S.booted = true;
   $("#root").innerHTML = '<div class="empty" style="padding-top:20vh">Loading your academy…</div>';
   try {
-    const b = await api("bootstrap");
+    let b;
+    for (let i = 0; ; i++) {
+      try { b = await api("bootstrap"); break; } catch (e) { if (i >= 2 || !e.network) throw e; await new Promise((r) => setTimeout(r, 1500 * (i + 1))); }
+    }
     S.profile = b.profile; S.today = b.today; S.packs = b.packs; S.aiReady = b.aiReady;
     const mine = S.packs.find((p) => p.id === S.profile.team);
     const saved = store.get("pack", null);
-    S.packId = isManager() && saved && S.packs.some((p) => p.id === saved) ? saved : mine && mine.levels.length ? mine.id : "sales";
+    S.packId = isManager() && saved && S.packs.some((p) => p.id === saved && p.levels.length) ? saved : mine && mine.levels.length ? mine.id : "sales";
     [S.attempts, S.attendance, S.dayNote] = await Promise.all([loadAttempts(S.profile.id), loadAttendance(S.profile.id), loadNote(S.profile.id, S.today)]);
     renderShell();
     render();
@@ -218,9 +222,12 @@ async function startApp() {
 /* ---------- Shell ---------- */
 function renderShell() {
   const nav = [["home", "home", "Home"], ["course", "course", "Course"], ["progress", "chart", "My progress"], ...(isManager() ? [["team", "team", "Team"]] : []), ["guide", "help", "How it works"]];
-  const packSel = isManager() && S.packs.length > 1 ? `<div class="side-pack"><select id="packSel" aria-label="Training course">${S.packs.map((p) => `<option value="${esc(p.id)}" ${p.id === S.packId ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>` : "";
+  const tracks = S.packs.filter((p) => p.levels.length);
+  const packSel = isManager() && tracks.length > 1
+    ? `<div class="side-pack" role="group" aria-label="Training track"><small>Track</small>${tracks.map((p) => `<button type="button" data-track="${esc(p.id)}" aria-pressed="${p.id === S.packId}">${icon(p.id === "support" ? "help" : "phone")}<span>${esc(trackShort(p))}</span></button>`).join("")}</div>`
+    : `<div class="side-pack"><small>Your track</small><span class="track-tag">${icon(S.packId === "support" ? "help" : "phone")}${esc(pack().name)}</span></div>`;
   const name = S.profile.full_name || S.profile.email;
-  $("#root").innerHTML = `<div class="shell"><aside class="side">
+  $("#root").innerHTML = `<div class="shell" data-track="${esc(S.packId)}"><aside class="side">
       <div class="brand"><span class="logo">${icon("phone")}</span><div><b>Homesly Academy</b><small>Call Coach</small></div></div>
       <nav class="nav" id="nav">${nav.map(([v, ic, l]) => `<a href="#${v}" data-view="${v}">${icon(ic)}<span>${l}</span></a>`).join("")}</nav>
       <div class="grow"></div>${packSel}
@@ -228,8 +235,7 @@ function renderShell() {
     </aside><main class="main"><div class="page" id="app"></div></main></div>`;
   $("#nav").addEventListener("click", (e) => { const a = e.target.closest("a[data-view]"); if (!a) return; e.preventDefault(); go(a.dataset.view); });
   $("#signout").onclick = () => { stopVoice(); S.sb.auth.signOut(); };
-  const ps = $("#packSel");
-  if (ps) ps.onchange = () => { S.packId = ps.value; store.set("pack", ps.value); go(S.view); };
+  document.querySelectorAll("[data-track]").forEach((b) => b.tagName === "BUTTON" && (b.onclick = () => { S.packId = b.dataset.track; store.set("pack", S.packId); S.team.sel = null; renderShell(); go(S.view); }));
 }
 function go(v) {
   if (!ROUTES.includes(v) || (v === "team" && !isManager())) v = "home";
@@ -278,8 +284,8 @@ function bindEyes(root) {
   }));
 }
 function renderAuth(mode) {
-  const art = `<div class="auth-art"><div><p class="eyebrow">Homesly Academy</p><h1>Practise the call before it's real.</h1><p>AI guests built from real Homesly calls. Six levels, a fresh scenario every time, and instant coaching on every line you say.</p>
-    <ul><li>${icon("phone")}Talk to realistic AI guests, out loud</li><li>${icon("star")}Unlock six levels, from openings to complaints</li><li>${icon("chart")}See your scores, streak and attendance</li></ul></div><p class="muted" style="color:#84999f;font-size:13px">For Homesly staff only. Sign in with your company email.</p></div>`;
+  const art = `<div class="auth-art"><div><p class="eyebrow">Homesly Academy</p><h1>Practise the call before it's real.</h1><p>AI guests built from real Homesly calls. Separate tracks for Sales and Customer support, six levels each, a fresh scenario every time, and instant coaching on every line you say.</p>
+    <ul><li>${icon("phone")}Talk to realistic AI guests, out loud</li><li>${icon("star")}Sales and Customer support tracks, six levels each</li><li>${icon("chart")}See your scores, streak and attendance</li></ul></div><p class="muted" style="color:#84999f;font-size:13px">For Homesly staff only. Sign in with your company email.</p></div>`;
   let form;
   if (mode === "reset") {
     form = `<h2 style="font-size:24px;margin-bottom:14px">Set a new password</h2><form id="f">${pwField("pw", "New password (8+ characters)", "new-password", 8)}<button class="btn primary lg" type="submit" style="width:100%">Save password</button><p class="msg" id="m"></p></form>`;
@@ -339,7 +345,7 @@ function renderHome(app) {
   const nx = cs.next;
   let html = "";
   if (!S.aiReady) html += '<div class="notice warn">The AI isn\'t connected yet (ANTHROPIC_API_KEY missing). A manager needs to finish SETUP.md.</div>';
-  html += `<section class="hero"><div><p class="eyebrow">${esc(p.name)} · ${esc(prettyKey(S.today))}</p><h1>${esc(hello)}${first ? ", " + esc(first) : ""}.</h1>
+  html += `<section class="hero"><div><p class="eyebrow"><span class="hero-track">${icon(p.id === "support" ? "help" : "phone")}${esc(p.name)} track</span> · ${esc(prettyKey(S.today))}</p><h1>${esc(hello)}${first ? ", " + esc(first) : ""}.</h1>
       <p>${todays.length >= goal ? "Daily goal done. Keep going if you like, or come back tomorrow to keep your streak." : `Complete ${goal - Math.min(goal, todays.length)} more session${goal - todays.length === 1 ? "" : "s"} today to hit your daily goal.`}</p></div>
     <div class="hero-stats">${ring(Math.min(todays.length, goal), goal, 96, `${todays.length}/${goal}`, "today", "#e3b866", "rgba(255,255,255,.12)")}
       <div class="stat-mini"><b>${streak(S.attempts)}</b><span>day streak</span></div>
@@ -363,7 +369,7 @@ function renderHome(app) {
   const gn = $("#gennote");
   if (gn) gn.onclick = async () => {
     gn.disabled = true; $("#notemsg").className = "msg"; $("#notemsg").textContent = "Writing your summary…";
-    try { const r = await api("summary"); S.dayNote = r.note; render(); }
+    try { const r = await api("summary", { pack: S.packId }); S.dayNote = r.note; render(); }
     catch (e) { gn.disabled = false; $("#notemsg").className = "msg err"; $("#notemsg").textContent = e.message; }
   };
 }
@@ -544,13 +550,13 @@ function renderPlayer(app) {
     return;
   }
   if (c.kind === "call") {
-    const tabs = [["brief", "Brief"], ["system", "Live system"], ["rules", "Scoring"]];
+    const tabs = [["brief", "Brief"], ["system", pack().systemLabel || "Live system"], ["rules", "Scoring"]];
     let body = "";
     if (c.tab === "brief") body = `<div class="brief"><p class="eyebrow">${esc(v.scenario)} · ${v.dir === "out" ? "You called them" : "They called you"}</p><h2 style="font-size:20px">${esc(v.title)}</h2>
-      <p><b>${esc(v.hotel)}${v.town ? ", " + esc(v.town) : ""}</b></p><p>${v.dir === "out" ? `You're calling <b>${esc(v.guest)}</b>, who started a booking on the website but didn't finish. They've just picked up.` : `<b>${esc(v.guest)}</b> is calling the hotel.`}</p>
-      ${v.nights ? `<p class="muted">Enquiry: ${esc(v.arriveText)}, ${v.nights} night${v.nights > 1 ? "s" : ""}, ${v.adults} adult${v.adults > 1 ? "s" : ""}${v.children.length ? ", child aged " + v.children.join(", ") : ""}.</p>` : ""}
+      <p><b>${esc(v.hotel)}${v.town ? ", " + esc(v.town) : ""}</b></p><p>${v.dir === "out" ? `You're calling <b>${esc(v.guest)}</b>, who started a booking on the website but didn't finish. They've just picked up.` : `<b>${esc(v.guest)}</b> is calling the hotel.${v.booking?.length ? " Open the <b>" + esc(pack().systemLabel || "Live system") + "</b> tab to find their booking." : ""}`}</p>
+      ${v.nights && !v.booking?.length ? `<p class="muted">Enquiry: ${esc(v.arriveText)}, ${v.nights} night${v.nights > 1 ? "s" : ""}, ${v.adults} adult${v.adults > 1 ? "s" : ""}${v.children.length ? ", child aged " + v.children.join(", ") : ""}.</p>` : ""}
       <p class="muted" style="font-size:13px">Based on: ${esc(v.from)}</p></div>`;
-    if (c.tab === "system") body = `<div class="sys">${rateLines(v).map((l) => `<div>${esc(l)}</div>`).join("")}${Object.keys(v.kb).length ? '<div class="k">— knowledge base —</div>' + Object.entries(v.kb).map(([k, x]) => `<div><span class="k">${esc(k)}:</span> ${esc(x)}</div>`).join("") : ""}</div><p class="muted" style="font-size:12.5px;margin:10px 0 0">Practice values for this scenario only. Quote only what's here; if a fact isn't here, say you'll check with the team.</p>`;
+    if (c.tab === "system") body = `<div class="sys">${v.booking?.length ? '<div class="k">— booking —</div>' + v.booking.map((l) => { const i = l.indexOf(": "); return `<div><span class="k">${esc(l.slice(0, i))}:</span> ${esc(l.slice(i + 2))}</div>`; }).join("") + (v.rates.length ? '<div class="k">— live rate —</div>' : "") : ""}${rateLines(v).map((l) => `<div>${esc(l)}</div>`).join("")}${Object.keys(v.kb).length ? '<div class="k">— knowledge base —</div>' + Object.entries(v.kb).map(([k, x]) => `<div><span class="k">${esc(k)}:</span> ${esc(x)}</div>`).join("") : ""}</div><p class="muted" style="font-size:12.5px;margin:10px 0 0">Practice values for this scenario only. Quote only what's here; if a fact isn't here, say you'll check with the team.</p>`;
     if (c.tab === "rules") body = `<ul class="rules">${pack().criteria.map((x) => `<li${v.targets.includes(x.id) ? ' style="font-weight:600"' : ""}>${esc(x.label)}: ${esc(x.tip)}</li>`).join("")}</ul><p class="muted" style="font-size:12.5px">Bold = the focus of this lesson.</p>`;
     left = `<div class="card"><div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${c.tab === k}">${l}</button>`).join("")}</div>${body}</div>`;
     const thread = c.turns.map((t) => `<div class="bubble ${t.who === "me" ? "me" : "guest"}"><span class="who2">${t.who === "me" ? "You" : esc(v.guest.split(" (")[0])}</span>${esc(t.text)}</div>`).join("");
@@ -597,9 +603,9 @@ function renderPlayer(app) {
   setEq(voice.speaking); updateMic();
 }
 function rateLines(v) {
-  if (!v.rates.length) return ["(no booking on this call)"];
+  if (!v.rates.length) return v.booking?.length ? [] : ["(no booking on this call)"];
   return v.rates.map((x) => `${x.room}: ${money(x.perNight)}/night × ${v.nights} = ${money(x.perNight * v.nights)} total, ${x.breakfast ? "breakfast included" : "room only"}\n  ${x.cancel}`)
-    .concat([`Dates: ${v.arriveText} → ${v.departText} (${v.nights} night${v.nights > 1 ? "s" : ""})`]);
+    .concat(v.booking?.length ? [] : [`Dates: ${v.arriveText} → ${v.departText} (${v.nights} night${v.nights > 1 ? "s" : ""})`]);
 }
 function resultChip(r) { return r === "met" ? '<span class="chip good">Met</span>' : r === "partial" ? '<span class="chip warn">Partly</span>' : r === "missed" ? '<span class="chip bad">Missed</span>' : '<span class="chip">N/A</span>'; }
 function resultCard(a, lessonId, variantId) {
@@ -672,7 +678,8 @@ async function renderTeam(app) {
   ]);
   if (S.view !== "team" || S.call) return;
   if (pr.error || at.error) { app.innerHTML = '<div class="notice warn">Could not load the team. Reload the page.</div>'; return; }
-  const people = pr.data, allAt = (at.data || []).filter((a) => a.pack === S.packId), checks = ck.data || [];
+  const everyone = pr.data, rawAt = at.data || [], checks = ck.data || [];
+  const people = everyone.filter((p) => (p.team || "sales") === S.packId), allAt = rawAt.filter((a) => a.pack === S.packId);
   const wk = keyOf(addDays(S.today, -6));
   const goal = pack().dailyGoal || 3;
   const days14 = []; for (let i = 13; i >= 0; i--) days14.push(keyOf(addDays(S.today, -i)));
@@ -696,7 +703,21 @@ async function renderTeam(app) {
   const teamAvg = teamW.length ? Math.round(teamW.reduce((s, a) => s + a.score, 0) / teamW.length) : null;
   const totalLessons = pack().levels.reduce((s, l) => s + l.lessons.length, 0);
   const sorted = [...per].sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1));
-  app.innerHTML = `<div class="course-head"><div><p class="eyebrow">${esc(pack().name)} · Managers only</p><h1>Team</h1></div><span class="muted" style="font-size:13px">${esc(prettyKey(S.today))}</span></div>
+  const wk7 = keyOf(addDays(S.today, -6));
+  const overview = S.packs.filter((p) => p.levels.length).map((p) => {
+    const ppl = everyone.filter((x) => (x.team || "sales") === p.id && x.role !== "manager");
+    const ids = new Set(ppl.map((x) => x.id));
+    const w = rawAt.filter((a) => a.pack === p.id && ids.has(a.user_id) && a.day >= wk7);
+    const avg = w.length ? Math.round(w.reduce((sum, a) => sum + a.score, 0) / w.length) : null;
+    const today = new Set(rawAt.filter((a) => a.pack === p.id && a.day === S.today && ids.has(a.user_id)).map((a) => a.user_id)).size;
+    return `<button type="button" class="track-card ${p.id === S.packId ? "on" : ""}" data-track="${esc(p.id)}" data-trackcard="1"><span class="lesson-ico ${p.id === "support" ? "drill" : ""}">${icon(p.id === "support" ? "help" : "phone")}</span>
+      <div class="tc-body"><b>${esc(p.name)}</b><small>${p.levels.length} levels · ${p.lessons.length} lessons</small></div>
+      <dl><div><dt>Trainees</dt><dd>${ppl.length}</dd></div><div><dt>Practised today</dt><dd>${today}/${ppl.length}</dd></div><div><dt>Avg (7d)</dt><dd>${avg ?? "–"}</dd></div><div><dt>Sessions (7d)</dt><dd>${w.length}</dd></div></dl></button>`;
+  }).join("");
+  app.innerHTML = `<div class="course-head"><div><p class="eyebrow">Managers only · ${esc(prettyKey(S.today))}</p><h1>Team dashboard</h1></div></div>
+    <div class="track-cards">${overview}</div>
+    <h2 class="section-title">${esc(pack().name)}</h2>
+    ${people.length ? "" : `<div class="notice">Nobody is in the ${esc(pack().name)} team yet. Set a person's Team below (switch track to see them) or in the other track's People table.</div>`}
     <div class="kpis"><div class="kpi"><span>Trainees</span><b>${pool.length}</b><small>${people.length - pool.length} manager${people.length - pool.length === 1 ? "" : "s"}</small></div>
       <div class="kpi"><span>Practised today</span><b>${activeToday}/${pool.length}</b><small>Daily goal: ${goal} sessions</small></div>
       <div class="kpi"><span>Attendance (7 days)</span><b>${attRate}%</b><small>Days practised ÷ days</small></div>
@@ -715,12 +736,13 @@ async function renderTeam(app) {
   const setField = async (id, field, value) => {
     const m = $("#teammsg");
     const { error } = await S.sb.from("profiles").update({ [field]: value }).eq("id", id);
-    m.className = "msg " + (error ? "err" : "ok"); m.textContent = error ? "Could not save: " + error.message : "Saved.";
+    m.className = "msg " + (error ? "err" : "ok"); m.textContent = error ? "Could not save: " + error.message : field === "team" ? "Saved. They now train on the " + (value === "support" ? "Customer support" : "Sales & reservations") + " track (from their next page load)." : "Saved.";
   };
   app.querySelectorAll("[data-team]").forEach((s) => (s.onchange = () => setField(s.dataset.team, "team", s.value)));
   app.querySelectorAll("[data-role]").forEach((s) => (s.onchange = () => setField(s.dataset.role, "role", s.value)));
   app.querySelectorAll("[data-person]").forEach((b) => (b.onclick = () => openPerson(b.dataset.person, people)));
-  if (S.team.sel) openPerson(S.team.sel, people);
+  app.querySelectorAll("[data-trackcard]").forEach((b) => (b.onclick = () => { S.packId = b.dataset.track; store.set("pack", S.packId); S.team.sel = null; renderShell(); go("team"); }));
+  if (S.team.sel && people.some((p) => p.id === S.team.sel)) openPerson(S.team.sel, people);
 }
 async function openPerson(id, people) {
   S.team.sel = id;
@@ -742,7 +764,7 @@ async function openPerson(id, people) {
 function renderGuide(app) {
   const p = pack();
   app.innerHTML = `<div class="course-head"><div><p class="eyebrow">How it works</p><h1>Practise the call before it's real</h1></div></div>
-  <div class="grid3"><section class="card"><span class="lesson-ico">${icon("course")}</span><h3 style="margin-top:12px">Six levels</h3><p class="muted" style="margin:0">From your opening line to complaints and group bookings. Pass every lesson in a level with ${p.passMark}+ to earn its badge and unlock the next.</p></section>
+  <div class="grid3"><section class="card"><span class="lesson-ico">${icon("course")}</span><h3 style="margin-top:12px">${p.levels.length} levels</h3><p class="muted" style="margin:0">${esc(p.levels.map((l) => l.title).join(" → "))}. Pass every lesson in a level with ${p.passMark}+ to earn its badge and unlock the next.</p></section>
     <section class="card"><span class="lesson-ico">${icon("phone")}</span><h3 style="margin-top:12px">The guest speaks first</h3><p class="muted" style="margin:0">Press Start and the AI guest picks up, out loud. Answer by speaking (Chrome or Edge) or typing. With hands-free on, it feels like a real call.</p></section>
     <section class="card"><span class="lesson-ico drill">${icon("star")}</span><h3 style="margin-top:12px">Your own scenario</h3><p class="muted" style="margin:0">Every attempt creates a fresh guest, dates, prices and twist just for you. Colleagues never get the same call, so practise, don't copy.</p></section></div>
   <section class="card"><h3>Attendance and your daily goal</h3><p style="margin:0">Do <b>${p.dailyGoal} sessions a day</b> to meet your goal. The calendar shows <b>goal met</b>, <b>practised</b> (1–${p.dailyGoal - 1} sessions), <b>logged in only</b>, or <b>absent</b>. Managers see everyone's attendance and scores in the Team page.</p></section>

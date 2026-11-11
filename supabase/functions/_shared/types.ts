@@ -26,6 +26,10 @@ export interface Roleplay {
   children: number[];
   rates: Rate[];
   kb: Record<string, string>;
+  /** Support calls: the existing booking as shown in the booking system. "{ref}" becomes a fresh reference. */
+  booking?: Record<string, string>;
+  /** What the call is about, for the AI guest (replaces the default abandoned-booking context). */
+  situation?: string;
   /** "{name}" is replaced with the generated name. */
   persona: string;
   /** Hidden from trainees. Only the AI guest sees this. "{name}" is replaced. */
@@ -56,6 +60,10 @@ export interface Pack {
   id: string;
   name: string;
   description: string;
+  /** Who the trainee is, for the AI prompts, e.g. "reservations agent". */
+  staffRole?: string;
+  /** Label of the tab that shows rates and facts during a call. */
+  systemLabel?: string;
   /** Score needed to pass a lesson. */
   passMark: number;
   /** Sessions per day that count as "present" for attendance. */

@@ -47,9 +47,19 @@ const pick = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
 const fill = (s: string, name: string) => s.replaceAll("{name}", name);
 /** The guest's display name: templates with "{name}" keep their label (e.g. "(lead name)"); others use the generated name. */
 const guestName = (t: Roleplay, name: string): string => (t.guest.includes("{name}") ? fill(t.guest, name) : name);
+const role = (p: Pack) => p.staffRole || "hotel agent";
+/** The existing booking as the agent sees it, with this variant's reference and dates. */
+function bookingLines(t: Roleplay, v: CallVariant, today: string): string[] {
+  if (!t.booking) return [];
+  const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
+  const lines = Object.entries(t.booking).map(([k, val]) => `${k}: ${val.replaceAll("{ref}", v.ref || "HS-00000")}`);
+  if (t.nights) lines.splice(1, 0, `Stay: ${longDate(a)} to ${longDate(d)} (${t.nights} night${t.nights > 1 ? "s" : ""}), ${t.adults} adult${t.adults > 1 ? "s" : ""}${t.children.length ? ", children aged " + t.children.join(", ") : ""}`);
+  lines.push(`Guest name: ${guestName(t, v.name)}`);
+  return lines;
+}
 
 type CallVariant = {
-  kind: "call"; name: string; arrive: number; rates: Rate[]; personaDetail: string; twist: string; firstLine: string;
+  kind: "call"; ref?: string; name: string; arrive: number; rates: Rate[]; personaDetail: string; twist: string; firstLine: string;
 };
 type DrillVariant = { kind: "drill"; guestLine: string; context: string };
 
@@ -67,7 +77,7 @@ function publicCall(t: Roleplay, v: CallVariant, today: string, id: string) {
   const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
   return {
     variantId: id, kind: "call", lessonId: t.id, title: t.title, scenario: t.scenario, hotel: t.hotel, town: t.town, dir: t.dir, voice: t.voice,
-    guest: guestName(t, v.name), persona: fill(t.persona, v.name), from: t.from, nights: t.nights, adults: t.adults, children: t.children,
+    guest: guestName(t, v.name), persona: fill(t.persona, v.name), from: t.from, situation: t.situation ?? "", booking: bookingLines(t, v, today), nights: t.nights, adults: t.adults, children: t.children,
     arriveText: t.nights ? longDate(a) : "", departText: t.nights ? longDate(d) : "", rates: v.rates, kb: t.kb, targets: t.targets, firstLine: v.firstLine,
   };
 }
@@ -90,11 +100,11 @@ async function createCallVariant(admin: SupabaseClient, pack: Pack, t: Roleplay,
   const a = addDays(ukToday(), arrive);
   type Gen = { persona_detail: string; twist: string; first_line: string };
   const gen = await askJson<Gen>(
-    "You write realistic, varied practice-call scenarios for hotel reservation staff training in the UK. Plain British English.",
+    `You write realistic, varied practice-call scenarios for hotel ${role(pack)} training in the UK. Plain British English.`,
     `Create a fresh variation of this practice call so that no two trainees get the same call.
 
 Scenario: ${t.title} (${t.scenario}). Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}.
-Direction: ${t.dir === "out" ? "the hotel agent phones this person" : "this person phones the hotel"}.
+Direction: ${t.dir === "out" ? "the hotel agent phones this person" : "this person phones the hotel"}.${t.situation ? "\nWhat the call is about: " + t.situation : ""}
 Person: ${guestName(t, name)}. ${fill(t.persona, name)}
 Core behaviour that must stay true: ${fill(t.behaviour, name)}
 ${t.nights ? `Stay: arriving ${longDate(a)} for ${t.nights} night(s), ${t.adults} adult(s)${t.children.length ? ", children aged " + t.children.join(", ") : ""}.` : ""}
@@ -107,7 +117,7 @@ Return:
     { type: "object", additionalProperties: false, required: ["persona_detail", "twist", "first_line"], properties: { persona_detail: { type: "string" }, twist: { type: "string" }, first_line: { type: "string" } } },
     "low",
   );
-  const data: CallVariant = { kind: "call", name, arrive, rates, personaDetail: gen.persona_detail, twist: gen.twist, firstLine: gen.first_line.replace(/^["']|["']$/g, "") };
+  const data: CallVariant = { kind: "call", ref: t.booking ? `HS-${Math.floor(10000 + Math.random() * 90000)}` : undefined, name, arrive, rates, personaDetail: gen.persona_detail, twist: gen.twist, firstLine: gen.first_line.replace(/^["']|["']$/g, "") };
   for (let i = 0; i < 3; i++) {
     const sig = i === 0 ? `${name}|${arrive}` : `${name}|${arrive}|${crypto.randomUUID().slice(0, 6)}`;
     const { data: row, error } = await admin.from("scenario_variants").insert({ pack: pack.id, lesson_id: t.id, kind: "call", user_id: userId, signature: sig, data }).select("id").single();
@@ -124,7 +134,7 @@ async function createDrillVariant(admin: SupabaseClient, pack: Pack, t: Drill, u
   for (let attempt = 0; attempt < 3; attempt++) {
     type Gen = { guest_line: string; context: string };
     const gen = await askJson<Gen>(
-      "You write realistic, varied guest lines for hotel reservation staff training in the UK. Plain British English.",
+      `You write realistic, varied guest lines for hotel ${role(pack)} training in the UK. Plain British English.`,
       `Write a NEW version of this training moment so each trainee gets a different one.
 Situation: ${t.title}. Original guest line: ${t.guest}
 What went wrong on the real call: ${t.was}
@@ -190,16 +200,19 @@ function rateLines(t: Roleplay, v: CallVariant, today: string): string[] {
   if (!v.rates.length) return ["(no booking on this call)"];
   const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
   return v.rates.map((r) => `${r.room}: ${money(r.perNight)}/night x ${t.nights} = ${money(r.perNight * t.nights)} total, ${r.breakfast ? "breakfast included" : "room only"}. ${r.cancel}`)
-    .concat([`Dates: ${longDate(a)} to ${longDate(d)} (${t.nights} night${t.nights > 1 ? "s" : ""})`]);
+    .concat(t.booking ? [] : [`Dates: ${longDate(a)} to ${longDate(d)} (${t.nights} night${t.nights > 1 ? "s" : ""})`]);
 }
-function guestSystem(t: Roleplay, v: CallVariant, today: string): string {
+function guestSystem(pack: Pack, t: Roleplay, v: CallVariant, today: string): string {
   const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
   const kids = t.children.length ? ` and ${t.children.length} child${t.children.length > 1 ? "ren" : ""} aged ${t.children.join(", ")}` : "";
-  const stay = t.nights ? `The stay: arriving ${longDate(a)}, leaving ${longDate(d)}, ${t.adults} adult${t.adults > 1 ? "s" : ""}${kids}.` : "This call is about a past stay, not a new booking.";
-  return `You are role-playing a phone call to train a hotel reservations agent at Homesly, a group of independent UK hotels. You play the OTHER PERSON on the call and stay fully in character.
+  const stay = t.nights ? `The stay: arriving ${longDate(a)}, leaving ${longDate(d)}, ${t.adults} adult${t.adults > 1 ? "s" : ""}${kids}.${v.ref ? ` Your booking reference is ${v.ref} (give it only if asked).` : ""}` : "This call is about a past stay, not a new booking.";
+  const type = t.dir === "out"
+    ? `OUTBOUND. ${t.situation || "The agent is calling you about a booking you started on the hotel website but did not finish."} You have already answered the phone.`
+    : `INBOUND. ${t.situation ? t.situation + " " : ""}You called the hotel and have already said your opening line.`;
+  return `You are role-playing a phone call to train a hotel ${role(pack)} at Homesly, a group of independent UK hotels. You play the OTHER PERSON on the call and stay fully in character.
 
 Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}.
-Call type: ${t.dir === "out" ? "OUTBOUND. The agent is calling you about a booking you started on the hotel website but did not finish. You have already answered the phone." : "INBOUND. You called the hotel and have already said your opening line."}
+Call type: ${type}
 Your name: ${guestName(t, v.name)}.
 Who you are: ${fill(t.persona, v.name)} ${v.personaDetail}
 ${stay}
@@ -221,7 +234,9 @@ function guestMessages(firstLine: string, turns: Turn[]): Anthropic.Beta.BetaMes
   return msgs;
 }
 
-const COACH_SYSTEM = "You are an experienced, fair and encouraging hotel reservations coach for Homesly, a group of independent UK hotels. You are strict about compliance: card details, live prices, invented facts and privacy. Write in plain British English.";
+const coachSystem = (p: Pack) => p.id === "support"
+  ? "You are an experienced, fair and encouraging hotel guest-support coach for Homesly, a group of independent UK hotels. You are strict about compliance: verification and privacy, card details, invented facts, refunds or freebies promised without approval, and safety escalation. Write in plain British English."
+  : "You are an experienced, fair and encouraging hotel reservations coach for Homesly, a group of independent UK hotels. You are strict about compliance: card details, live prices, invented facts and privacy. Write in plain British English.";
 
 function assessPrompt(pack: Pack, t: Roleplay, v: CallVariant, turns: Turn[], today: string): string {
   const transcript = turns.map((x) => (x.who === "me" ? "AGENT: " : "OTHER PERSON: ") + x.text).join("\n");
@@ -231,7 +246,7 @@ SCENARIO: ${t.scenario}: "${t.title}". Hotel: ${t.hotel}${t.town ? ", " + t.town
 Person on the call: ${guestName(t, v.name)}. ${fill(t.persona, v.name)} ${v.personaDetail} Extra detail: ${v.twist}
 
 WHAT THE AGENT COULD SEE ON SCREEN (the only prices and facts they may use):
-Live rate (check_rate result):
+${t.booking ? "Booking system:\n" + bookingLines(t, v, today).join("\n") + "\n" : ""}Live rate (check_rate result):
 ${rateLines(t, v, today).join("\n")}
 Knowledge base:
 ${Object.entries(t.kb).map(([k, val]) => `${k}: ${val}`).join("\n") || "(nothing)"}
@@ -245,9 +260,14 @@ ${transcript}
 
 Scoring guidance:
 - Mark each rule "met", "partial", "missed" or "na" (did not come up). Include every rule once.
-- An outbound call where the agent never says the hotel name and that the line is recorded is "missed" for disclosure.
+${pack.id === "support"
+  ? `- Discussing or changing booking details before confirming the guest's name and reference (or dates) is "missed" for verification.
+- Promising a refund, discount, free night, upgrade or compensation that the knowledge base does not allow is "missed" for resolution.
+- Answering a question marked "Not in knowledge base" from memory is "missed" for kb_facts.
+- Asking for or accepting card details is "missed" for no_card.`
+  : `- An outbound call where the agent never says the hotel name and that the line is recorded is "missed" for disclosure.
 - Quoting a price or total not on the live rate panel, or a wrong total, is "missed" for live_price.
-- Asking for or accepting card details is "missed" for no_card.
+- Asking for or accepting card details is "missed" for no_card.`}
 - score is 0 to 100 overall.
 - better_lines: up to 3 of the agent's weakest moments. "original" quotes the agent exactly; "better" is under 30 words; "why" under 12 words.
 - strengths: up to 2. improvements: up to 3 short, specific actions. summary: two sentences.`;
@@ -258,7 +278,7 @@ function assessSchema(pack: Pack) {
     required: ["score", "outcome", "summary", "criteria", "strengths", "improvements", "better_lines"],
     properties: {
       score: { type: "integer" },
-      outcome: { type: "string", enum: ["booked", "link-sent", "callback-scheduled", "transferred", "message-taken", "not-interested", "wrong-number", "no-outcome"] },
+      outcome: { type: "string", enum: ["booked", "link-sent", "callback-scheduled", "transferred", "message-taken", "not-interested", "wrong-number", "resolved", "escalated", "no-outcome"] },
       summary: { type: "string" },
       criteria: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "result", "note"], properties: { id: { type: "string", enum: pack.criteria.map((c) => c.id) }, result: { type: "string", enum: ["met", "partial", "missed", "na"] }, note: { type: "string" } } } },
       strengths: { type: "array", items: { type: "string" } },
@@ -284,7 +304,7 @@ const clampScore = (n: unknown) => Math.max(0, Math.min(100, Math.round(Number(n
 /** Course as the browser sees it: hidden guest behaviour removed. */
 function publicPack(p: Pack) {
   return {
-    id: p.id, name: p.name, description: p.description, passMark: p.passMark, dailyGoal: p.dailyGoal, criteria: p.criteria, levels: p.levels,
+    id: p.id, name: p.name, description: p.description, systemLabel: p.systemLabel ?? "Live system", passMark: p.passMark, dailyGoal: p.dailyGoal, criteria: p.criteria, levels: p.levels,
     lessons: [
       ...p.roleplays.map((r) => ({ id: r.id, kind: "call", title: r.title, subtitle: `${r.scenario} · ${r.hotel}${r.town ? ", " + r.town : ""}`, from: r.from, minutes: 4, targets: r.targets, dir: r.dir })),
       ...p.drills.map((d) => ({ id: d.id, kind: "drill", title: d.title, subtitle: "Quick drill", from: d.from, minutes: 1, targets: d.targets })),
@@ -334,12 +354,12 @@ Deno.serve(async (req) => {
       }
 
       case "guest": {
-        const { row, lesson } = await loadVariant(admin, body.variantId, user.id);
+        const { row, pack, lesson } = await loadVariant(admin, body.variantId, user.id);
         if (lesson.kind !== "call") throw new HttpError(400, "Not a practice call.");
         const turns = cleanTurns(body.turns);
         await bumpUsage(admin, user.id, today);
         const v = row.data as CallVariant;
-        let text = await askText(guestSystem(lesson.t, v, today), guestMessages(v.firstLine, turns), "low");
+        let text = await askText(guestSystem(pack, lesson.t, v, today), guestMessages(v.firstLine, turns), "low");
         const ended = /\[END\]/i.test(text);
         text = text.replace(/\[END\]/gi, "").trim();
         return json({ text, ended });
@@ -353,7 +373,7 @@ Deno.serve(async (req) => {
         await bumpUsage(admin, user.id, today);
         const t = lesson.t, v = row.data as CallVariant;
         type Fb = { score: number; outcome: string; summary: string; criteria: { id: string; result: string; note: string }[]; strengths: string[]; improvements: string[]; better_lines: { original: string; better: string; why: string }[] };
-        const fb = await askJson<Fb>(COACH_SYSTEM, assessPrompt(pack, t, v, turns, today), assessSchema(pack), "medium");
+        const fb = await askJson<Fb>(coachSystem(pack), assessPrompt(pack, t, v, turns, today), assessSchema(pack), "medium");
         const insert = {
           user_id: user.id, pack: pack.id, kind: "roleplay", item_id: t.id, title: t.title, score: clampScore(fb.score), level: levelOf(pack, t.id), variant_id: row.id,
           outcome: fb.outcome, summary: fb.summary, criteria: fb.criteria, strengths: fb.strengths.slice(0, 2), improvements: fb.improvements.slice(0, 3),
@@ -378,11 +398,11 @@ What went wrong on the original real call: ${d.was}
 Task: ${d.task}
 Rules that apply:
 ${d.targets.map((x) => "- " + (pack.criteria.find((c) => c.id === x)?.tip ?? x)).join("\n")}
-General: staff speak as the hotel, in warm British English, under 25 words per turn, one question at a time. They never take card details by phone and never invent facts, prices or discounts.
+General: staff speak as the hotel, in warm British English, under 25 words per turn, one question at a time. They never take card details by phone and never invent facts, prices, refunds or discounts.${pack.id === "support" ? " Support staff verify the caller before discussing a booking, acknowledge feelings first, and escalate safety issues, complaints beyond policy and refunds." : ""}
 Trainee's answer: "${answer}"
 Give a score from 0 to 100, a one-sentence verdict, what worked (under 20 words), the most important fix (under 25 words), and an ideal reply (under 35 words).`;
         type Dfb = { score: number; verdict: string; good: string; fix: string; model_answer: string };
-        const fb = await askJson<Dfb>(COACH_SYSTEM, prompt, DRILL_SCHEMA, "low");
+        const fb = await askJson<Dfb>(coachSystem(pack), prompt, DRILL_SCHEMA, "low");
         const insert = {
           user_id: user.id, pack: pack.id, kind: "drill", item_id: d.id, title: d.title, score: clampScore(fb.score), level: levelOf(pack, d.id), variant_id: row.id,
           summary: fb.verdict, strengths: [fb.good], improvements: [fb.fix], better_lines: [{ original: answer, better: fb.model_answer, why: "" }],
@@ -394,11 +414,12 @@ Give a score from 0 to 100, a one-sentence verdict, what worked (under 20 words)
       }
 
       case "summary": {
-        const { data: rows } = await admin.from("attempts").select("kind, title, score, summary, improvements").eq("user_id", user.id).eq("day", today).order("created_at");
+        const sumPack = PACKS[String(body.pack)] ?? sales;
+        const { data: rows } = await admin.from("attempts").select("kind, title, score, summary, improvements").eq("user_id", user.id).eq("day", today).eq("pack", sumPack.id).order("created_at");
         if (!rows?.length) throw new HttpError(400, "Finish at least one session today first.");
         await bumpUsage(admin, user.id, today);
         const lines = rows.map((a) => `- ${a.kind} "${a.title}": score ${a.score}. ${a.summary ?? ""} Fixes: ${(a.improvements ?? []).join(" | ")}`).join("\n");
-        const note = await askText(COACH_SYSTEM,
+        const note = await askText(coachSystem(sumPack),
           [{ role: "user", content: `Write today's coaching summary for the trainee, addressed to them as "you", under 120 words, in plain text with no markdown symbols (no asterisks, hashes or headings). Use this structure: one sentence on how today went; "Keep doing:" one point; "Fix next:" two points; "Practise this line tomorrow:" one exact sentence they can say on calls. Base it only on these results:\n${lines}` }],
           "low");
         const { error } = await admin.from("day_notes").upsert({ user_id: user.id, day: today, note });

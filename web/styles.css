@@ -300,3 +300,26 @@ table.t select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px s
 .pw .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 7px; }
 .pw .eye:hover { color: var(--accent); background: var(--accent-soft); }
 .setup code { font-family: var(--f-mono); font-size: 13px; background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+
+/* ---------- Tracks (Sales / Customer support) ---------- */
+.shell[data-track="support"] { --accent: #6a4c93; --accent-soft: #eee8f6; }
+.shell[data-track="support"] .hero { background: linear-gradient(135deg, #1d1530 0%, #47336b 100%); }
+@media (prefers-color-scheme: dark) { .shell[data-track="support"] { --accent: #b39ddb; --accent-ink: #1a1226; --accent-soft: #2c2340; } }
+.side-pack { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px; margin: 4px 0; border-top: 1px solid var(--side-hi); }
+.side-pack small { color: var(--side-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 0 6px 2px; }
+.side-pack button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--side-ink); font: 500 14px var(--f-body); cursor: pointer; text-align: left; }
+.side-pack button:hover { background: var(--side-hi); }
+.side-pack button[aria-pressed="true"] { background: var(--side-hi); border-color: #2f5560; color: #fff; }
+.shell[data-track="support"] .side-pack button[aria-pressed="true"] { border-color: #5d4a85; }
+.side-pack button svg, .track-tag svg { width: 17px; height: 17px; flex: none; }
+.track-tag { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 13.5px; color: var(--side-ink); }
+.hero-track { display: inline-flex; align-items: center; gap: 6px; } .hero-track svg { width: 14px; height: 14px; }
+.track-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.track-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 14px; align-items: center; text-align: left; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; box-shadow: var(--shadow); cursor: pointer; font: inherit; }
+.track-card:hover { border-color: var(--accent); }
+.track-card.on { border: 2px solid var(--accent); padding: 15px 17px; }
+.track-card .tc-body b { display: block; font: 700 17px var(--f-display); } .track-card .tc-body small { color: var(--muted); font-size: 12.5px; }
+.track-card dl { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.track-card dt { font-size: 11.5px; color: var(--muted); } .track-card dd { margin: 2px 0 0; font: 700 20px var(--f-display); font-variant-numeric: tabular-nums; }
+.section-title { font-size: 20px; margin: 8px 0 -4px; }
+@media (max-width: 900px) { .side-pack { display: flex !important; flex-direction: row; border: 0; padding: 0; margin: 0; } .side-pack small, .side-pack button span, .track-tag { display: none; } .side-pack button { padding: 8px; width: auto; } }

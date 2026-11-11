@@ -11,6 +11,13 @@
 - **Attendance:** `attendance` table (daily check-in at app open) + sessions per day → Goal met (≥3), Practised (1–2), Logged in, Absent. Calendar per person; 14-day grid and 7-day rate for the team.
 - **Charts:** daily average bars, average by level, Core Rules bars; team performance bars and KPI tiles.
 
+## Version 3 (separate Sales and Customer support tracks)
+- **Two tracks, each with its own 6 levels, badges, scoring rules and colour.** Sales & reservations (26 lessons, `packs/sales.ts`) and Customer support (23 lessons, `packs/support.ts`: Support foundations → Changes & amendments → Payments & refunds → In-stay problems → Complaints & recovery → Incidents & escalation).
+- **Who sees what:** a person's **Team** (set by a manager in the Team page) decides their track. Managers can switch between tracks in the sidebar.
+- **Support calls** show a **Booking system** tab: the guest's existing booking with a fresh reference per trainee (`booking` field), plus any live rate and the knowledge base. `situation` tells the AI guest what the call is about.
+- **Team dashboard:** a card per track (trainees, practised today, 7-day average, sessions), then the selected track's KPIs, performance bars, attendance grid and people.
+- **Support facts are practice values** until the support knowledge base is supplied. Replace the `kb` values in `support.ts` with approved answers.
+
 ## 1. At a glance
 
 | What | Where |
