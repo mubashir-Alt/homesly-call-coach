@@ -1,0 +1,175 @@
+// Sales pack: built from 22 recorded reservation calls (26 Oct - 10 Nov 2026)
+// and the Homesly Voice Agents Shared Library (Core Rules).
+//
+// HOW TO EDIT
+// - Add a practice call: copy one object in `roleplays`, give it a new id (R14, R15...).
+// - Add a drill: copy one object in `drills`, give it a new id (D14...).
+// - `arrive` = days from today, `nights` = length of stay. Prices are practice values.
+// - `behaviour` is hidden from trainees; only the AI guest sees it.
+// - Push to main and the GitHub Action redeploys everything.
+
+import type { Pack } from "../types.ts";
+
+const pack: Pack = {
+  id: "sales",
+  name: "Sales & reservations",
+  description: "Abandoned bookings, enquiries and callbacks for Homesly hotels.",
+  criteria: [
+    { id: "disclosure", label: "Opening", tip: "Say your name, the hotel and town, and that the call is recorded." },
+    { id: "identity", label: "Right person", tip: "Confirm you are speaking to the right person before mentioning any stay, date or detail." },
+    { id: "live_price", label: "Live prices only", tip: "Quote only prices from the live rate panel. Totals must match. No price from memory." },
+    { id: "no_card", label: "No card by phone", tip: "Never take card details by phone. Offer the secure link: \"It takes about two minutes.\"" },
+    { id: "dates", label: "Dates + weekday", tip: "Read dates back with the weekday: \"Friday the 20th of November\"." },
+    { id: "kb_facts", label: "Facts from KB", tip: "Hotel facts only from the knowledge base. If it is not there: \"I'll check that with the team and text you back.\"" },
+    { id: "no_freebies", label: "No freebies", tip: "No discounts, holds, upgrades or extras unless the knowledge base allows them. Mention the direct perk instead." },
+    { id: "objection", label: "Objections", tip: "Use the approved reply, one follow-up, then a graceful exit. Never argue or push." },
+    { id: "next_step", label: "Next step", tip: "Never leave a call without a next step: booked, link sent, or callback time agreed." },
+    { id: "close", label: "Close", tip: "Ask \"Is there anything else I can help with?\" before ending." },
+    { id: "clarity", label: "Clarity & tone", tip: "Short turns, one question at a time, warm British English. No \"awesome\" or \"reach out\"." },
+  ],
+  roleplays: [
+    {
+      id: "R01", title: "Needs to ask her husband", scenario: "4.1 Abandoned booking", hotel: "Coach House", town: "Otterburn", dir: "out", voice: "female",
+      guest: "Sarah Hughes", from: "Real calls on 27 Oct, 6 Nov and 7 Nov", arrive: 16, nights: 1, adults: 2, children: [],
+      rates: [{ room: "Double", perNight: 95, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "Check-in / out": "15:00 / 11:00", "Parking": "Free car park behind the inn", "Direct perk": "Breakfast included when booking direct" },
+      persona: "Friendly, mid-40s, at work. Filled in the booking form last night then got distracted.",
+      behaviour: "You like the place but must check with your husband about time off. If the agent offers to text or email the details so you can show him, accept gladly and confirm your mobile. If the agent pushes you to book now, politely decline. If the agent asks for card details, become wary.",
+      targets: ["objection", "next_step"],
+    },
+    {
+      id: "R02", title: "Just checking prices", scenario: "4.1 Abandoned booking", hotel: "Station Hotel", town: "Portsoy", dir: "out", voice: "male",
+      guest: "Gary Fraser", from: "Real call on 10 Nov (7-night stay, 20% discount offered)", arrive: 3, nights: 7, adults: 1, children: [],
+      rates: [
+        { room: "Double", perNight: 62, breakfast: true, cancel: "Non-refundable" },
+        { room: "Double, flexible rate", perNight: 69, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" },
+      ],
+      kb: { "Direct perk": "Breakfast included and free late check-out to 12:00 when booking direct", "Discounts": "No long-stay discount in the knowledge base", "Parking": "Car park at the property" },
+      persona: "Contractor working in the area for a week. Price-led, a bit busy, blunt but not rude.",
+      behaviour: "Ask what the cheapest option is. Ask \"Can you do any better on that?\" at least once. Say another hotel is a few pounds cheaper. If the agent invents a discount, accept it happily (that is the trap). If the agent explains the perk and offers to text a link, say you'll probably book tonight.",
+      targets: ["no_freebies", "live_price"],
+    },
+    {
+      id: "R03", title: "Price is different from the website", scenario: "4.1 Abandoned booking", hotel: "Central Hotel", town: "Gloucester", dir: "out", voice: "female",
+      guest: "Chloe Barnes", from: "Real call on 3 Nov (£50, then £60, guest saw ~£90)", arrive: 11, nights: 1, adults: 3, children: [],
+      rates: [{ room: "Family room (sleeps 3)", perNight: 92, breakfast: false, cancel: "Free cancellation until 24 hours before arrival" }],
+      kb: { "Parking": "Not in knowledge base", "Breakfast": "Available at extra cost, served 07:30-10:00", "Check-out": "11:00" },
+      persona: "Organising a night out for three friends, comparing a few hotels.",
+      behaviour: "Say: \"When I looked online it was coming up as about £89.\" Watch whether the agent gives one consistent price. Ask whether there is parking. You are not ready to book: you need to check with your friends.",
+      targets: ["live_price", "kb_facts"],
+    },
+    {
+      id: "R04", title: "\"I already paid online. Is this a scam?\"", scenario: "4.1 Abandoned booking", hotel: "Park Hotel", town: "", dir: "out", voice: "female",
+      guest: "Linda Price", from: "Real call on 26 Oct (guest hung up to ring the hotel)", arrive: 22, nights: 1, adults: 1, children: [],
+      rates: [{ room: "Single", perNight: 74, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "find_booking": "If checked: CONFIRMED booking found for this guest, paid online, ref PH-48213" },
+      persona: "Careful, slightly older, has heard about hotel phone scams.",
+      behaviour: "You booked and paid online yesterday. If the agent asks you to confirm the reservation, say you already did. If the agent asks for card or payment details, say: \"Do you really work for the hotel? This sounds like a scam.\" Calm down only if the agent apologises, says they never take card details by phone and checks the booking.",
+      targets: ["no_card", "identity", "disclosure"],
+    },
+    {
+      id: "R05", title: "Guest starts reading out her card", scenario: "4.6 Callback / 4.1", hotel: "George Hotel", town: "Montrose", dir: "out", voice: "female",
+      guest: "Margaret Doyle", from: "Real calls on 4 Nov and 10 Nov (full card + CVC taken)", arrive: 9, nights: 2, adults: 2, children: [],
+      rates: [{ room: "Double", perNight: 88, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "Payment": "We never take card details by phone. Secure link only.", "Room requests": "Requests are noted for reception, not guaranteed" },
+      persona: "Warm, keen, decided. Wants to get it done now.",
+      behaviour: "You want to book straight away. As soon as the price is agreed, say \"I'll give you my card number, it's five three...\" and start reading made-up digits slowly. Stop if the agent interrupts. Ask if your friends, booked under the name Smith, can be on the same floor.",
+      targets: ["no_card", "kb_facts"],
+    },
+    {
+      id: "R06", title: "\"I don't like being cold-called\"", scenario: "4.1 Abandoned booking", hotel: "The Woodman Inn", town: "", dir: "out", voice: "male",
+      guest: "Paul Kerr", from: "Real call on 27 Oct (guest suspected a call centre)", arrive: 20, nights: 1, adults: 2, children: [],
+      rates: [
+        { room: "Standard King", perNight: 80, breakfast: true, cancel: "Free cancellation until 72 hours before arrival" },
+        { room: "Superior King", perNight: 95, breakfast: true, cancel: "Free cancellation until 72 hours before arrival" },
+      ],
+      kb: { "Location": "Not in knowledge base", "Direct perk": "Breakfast included when booking direct" },
+      persona: "Polite but irritated by sales calls. Travelling with a friend.",
+      behaviour: "Early on ask: \"How did you get my number?\" and later: \"Are you a call centre?\" Ask exactly where the inn is. If the agent stays calm and offers to email or text the link, accept. If the agent is defensive or pushy, end the call.",
+      targets: ["objection", "disclosure", "kb_facts"],
+    },
+    {
+      id: "R07", title: "Parking and a partner who can't walk far", scenario: "4.1 Abandoned booking", hotel: "Station Hotel", town: "Portsoy", dir: "out", voice: "female",
+      guest: "Irene Watt", from: "Real calls on 6 Nov and 7 Nov (parking answers contradicted)", arrive: 30, nights: 2, adults: 2, children: [],
+      rates: [
+        { room: "Double", perNight: 64, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" },
+        { room: "Sea-view Double", perNight: 79, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" },
+      ],
+      kb: { "Parking": "Car park at the property", "Ground-floor rooms": "Not in knowledge base", "Lift": "Not in knowledge base", "Sea-view rooms": "Sea-view Double room type exists" },
+      persona: "Planning a weekend away with her partner, who has limited mobility.",
+      behaviour: "Ask whether there is parking and how close it is. Explain your partner can't walk far and ask for a ground-floor room. Ask whether you can have a sea view. You want honest answers more than a sale.",
+      targets: ["kb_facts", "live_price"],
+    },
+    {
+      id: "R08", title: "Family worried about the deposit", scenario: "4.1 Abandoned booking", hotel: "Homesly Guestrooms", town: "Berwick-upon-Tweed", dir: "out", voice: "female",
+      guest: "Amy Robson", from: "Real call on 26 Oct (\"what is the £200 deposit?\")", arrive: 1, nights: 2, adults: 2, children: [7],
+      rates: [{ room: "Family room", perNight: 85, breakfast: false, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "Deposit": "Not in knowledge base", "Children": "Children of all ages welcome; cots on request", "Check-in": "From 15:00" },
+      persona: "Mum travelling tomorrow with her partner and their 7-year-old.",
+      behaviour: "Ask: \"What's this £200 deposit I saw?\" Ask how much it is in total for both nights. Ask whether you can cancel if your child is ill. You will book if the agent sends a link and gives clear answers.",
+      targets: ["kb_facts", "dates", "live_price"],
+    },
+    {
+      id: "R09", title: "Wrong number: a company switchboard", scenario: "4.1 Abandoned booking", hotel: "County Hotel", town: "Selkirk", dir: "out", voice: "female",
+      guest: "Thomas Reid (lead name)", from: "Real call on 6 Nov (reached a credit-card team)", arrive: 12, nights: 1, adults: 1, children: [],
+      rates: [{ room: "Double", perNight: 79, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: {},
+      persona: "You are a receptionist at a finance company, not the guest. You have never heard of Thomas Reid.",
+      behaviour: "Answer \"Accounts team, how can I help?\" You know nobody by the lead's name. If the agent starts reading out booking details, ask why they are telling you this. Be polite and brief.",
+      targets: ["identity", "close"],
+    },
+    {
+      id: "R10", title: "Spouse answers the phone", scenario: "4.1 Abandoned booking", hotel: "Hampton Hotel", town: "Wells", dir: "out", voice: "female",
+      guest: "David Morgan (booking name)", from: "Library path EO05; real calls had no identity check", arrive: 14, nights: 2, adults: 2, children: [],
+      rates: [{ room: "Double", perNight: 99, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: {},
+      persona: "You are Helen, David's wife. David is out.",
+      behaviour: "Answer and say David isn't in. Ask \"What's it about?\" If the agent tells you the booking dates or price, that is a privacy mistake: note it. If the agent asks when to call back, say after 6pm tomorrow.",
+      targets: ["identity", "next_step"],
+    },
+    {
+      id: "R11", title: "Calls back to switch from Booking.com", scenario: "4.6 Missed call callback", hotel: "Central Hotel", town: "Gloucester", dir: "in", voice: "female",
+      guest: "Joanne Price", from: "Real call on 4 Nov (guest cancelled an OTA booking to book direct)", arrive: 17, nights: 2, adults: 2, children: [],
+      rates: [{ room: "Deluxe Double", perNight: 84, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "OTA bookings": "Changes to Booking.com bookings go through Booking.com", "Direct perk": "Breakfast included when booking direct" },
+      persona: "Organised, a little impatient. Had trouble getting through on the phone.",
+      behaviour: "You start the call: \"Hi, someone rang me earlier about my stay. I've got a Booking.com booking but I'd rather book with you direct if it's cheaper.\" Ask the agent to match £150 for both nights. Mention the hotel numbers online are wrong.",
+      targets: ["live_price", "no_freebies", "next_step"],
+    },
+    {
+      id: "R12", title: "Company booker: six rooms for contractors", scenario: "4.7 Guest enquiries", hotel: "Hampton Hotel", town: "Wells", dir: "in", voice: "male",
+      guest: "Mark Ellis", from: "Real call on 26 Oct (corporate booking)", arrive: 21, nights: 4, adults: 6, children: [],
+      rates: [{ room: "Twin", perNight: 89, breakfast: true, cancel: "Free cancellation until 48 hours before arrival" }],
+      kb: { "Group threshold": "5 rooms or more go to the events team (take name, dates, numbers, contact details, then transfer or task)", "Invoicing": "Not in knowledge base" },
+      persona: "Operations manager at a building firm. Direct, busy.",
+      behaviour: "You start: \"I need six rooms for four nights for my lads, can you sort it?\" Ask for a group rate and whether you can pay on invoice. You are happy if the agent takes your details and gets the right person to call you today.",
+      targets: ["kb_facts", "next_step", "no_freebies"],
+    },
+    {
+      id: "R13", title: "Unhappy guest wants a refund", scenario: "4.7 Guest enquiries", hotel: "County Hotel", town: "Selkirk", dir: "in", voice: "male",
+      guest: "Steven Hall", from: "Library path X04 (complaints)", arrive: 0, nights: 0, adults: 1, children: [],
+      rates: [],
+      kb: { "Complaints": "Apologise, never argue or explain, transfer or create a task in their words" },
+      persona: "Stayed last weekend. The room was cold and the shower didn't work. Annoyed.",
+      behaviour: "You start: \"I stayed with you last weekend and frankly it was awful.\" Describe the problems and demand a refund. If the agent argues or makes excuses, get angrier. If they apologise sincerely and arrange for a manager to call you, calm down.",
+      targets: ["objection", "next_step", "close"],
+    },
+  ],
+  drills: [
+    { id: "D01", title: "Opening line", from: "6 of 20 calls: guests asked \"calling from where?\"", guest: "(The guest answers the phone) \"Hello?\"", was: "\"Hi, this is Rahul calling from Coach House.\" (no town, no recorded line, no identity check)", task: "Give the correct opening line for the Coach House in Otterburn, calling Sarah about her booking enquiry.", targets: ["disclosure", "identity"] },
+    { id: "D02", title: "Already paid online", from: "Park Hotel, 26 Oct", guest: "\"I've already paid for this online, so why are you asking me for my card details?\"", was: "Asked again for the card details. The guest said it sounded like a scam and hung up.", task: "Reply to the guest.", targets: ["no_card"] },
+    { id: "D03", title: "Guest offers card number", from: "George Hotel, 4 Nov", guest: "\"Right, I've got my card here. It's five three seven three...\"", was: "Took the full card number, expiry and security code and read them back.", task: "Interrupt and redirect the guest.", targets: ["no_card", "next_step"] },
+    { id: "D04", title: "Needs to ask the wife", from: "George Hotel, 27 Oct", guest: "\"I'll need to speak to my wife first, I'll get back to you.\"", was: "\"Okay. If you want, drop an email to us.\" (no text, no link)", task: "Reply so the guest has the details and a next step.", targets: ["objection", "next_step"] },
+    { id: "D05", title: "Just checking prices", from: "Station Hotel, 10 Nov", guest: "\"No, I don't want to confirm yet, I'm just checking prices.\"", was: "\"If you want, we can have a discount for you.\" (offered 20% unprompted)", task: "Reply without inventing a discount.", targets: ["no_freebies", "next_step"] },
+    { id: "D06", title: "Website showed a different price", from: "Central Hotel, 3 Nov", guest: "\"When I looked online it was close to £90. How is it £50?\"", was: "Changed the price to £60 without checking.", task: "Reply honestly. (Assume you have a live rate tool.)", targets: ["live_price"] },
+    { id: "D07", title: "Parking question", from: "Central Hotel, 6 Nov", guest: "\"Have you got parking there?\"", was: "\"No, there's no parking at the property... I think there's a normal parking, free parking.\" (contradicted itself)", task: "Reply, assuming parking is NOT in the knowledge base.", targets: ["kb_facts"] },
+    { id: "D08", title: "Ground-floor request", from: "Station Hotel, 7 Nov", guest: "\"My partner can't walk very far. Have you got ground-floor rooms?\"", was: "\"We don't have ground-floor rooms.\" Then moved straight on to price.", task: "Reply with care, assuming accessibility details are NOT in the knowledge base.", targets: ["kb_facts", "clarity"] },
+    { id: "D09", title: "Cancellation worry", from: "Woodman Inn, 27 Oct", guest: "\"If plans change, could I cancel at short notice?\"", was: "\"These are non-refundable prices. If you want to cancel you have to inform two, three days prior.\" (contradictory)", task: "Reply, assuming the rate is \"free cancellation until 72 hours before arrival\".", targets: ["kb_facts"] },
+    { id: "D10", title: "The £200 deposit", from: "Homesly Berwick, 26 Oct", guest: "\"What is the £200 deposit that you have to pay?\"", was: "\"No, there's no deposit like that.\" (from memory)", task: "Reply, assuming the deposit policy is NOT in the knowledge base.", targets: ["kb_facts"] },
+    { id: "D11", title: "Rooms near friends", from: "George Hotel, 4 Nov", guest: "\"Our friends are also booked with you under Smith. Any chance we could be close to each other?\"", was: "\"Yes, in the same floor, no problem.\" (promised without checking)", task: "Reply without promising.", targets: ["kb_facts"] },
+    { id: "D12", title: "Reading back the dates", from: "All 20 calls: dates never read back with the weekday", guest: "\"Yes, it's the 13th to the 20th of November.\"", was: "\"Okay, 13 to 20.\" (no weekday, no number of nights)", task: "Read the dates back properly (13 Nov 2026 is a Friday).", targets: ["dates"] },
+    { id: "D13", title: "\"Are you a call centre?\"", from: "Woodman Inn, 27 Oct", guest: "\"I know you're working from a call centre. I don't like being cold-called.\"", was: "\"No, no, this is an office. It just has an echo.\"", task: "Reply calmly and give the guest a choice.", targets: ["objection", "disclosure"] },
+  ],
+};
+
+export default pack;

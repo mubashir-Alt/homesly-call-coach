@@ -1,0 +1,8 @@
+.env
+.env.*
+node_modules/
+supabase/.temp/
+supabase/.branches/
+_site/
+.DS_Store
+Thumbs.db

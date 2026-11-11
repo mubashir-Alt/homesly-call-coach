@@ -1,0 +1,4 @@
+project_id = "homesly-call-coach"
+
+[functions.coach]
+verify_jwt = true
