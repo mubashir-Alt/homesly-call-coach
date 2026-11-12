@@ -323,3 +323,21 @@ table.t select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px s
 .track-card dt { font-size: 11.5px; color: var(--muted); } .track-card dd { margin: 2px 0 0; font: 700 20px var(--f-display); font-variant-numeric: tabular-nums; }
 .section-title { font-size: 20px; margin: 8px 0 -4px; }
 @media (max-width: 900px) { .side-pack { display: flex !important; flex-direction: row; border: 0; padding: 0; margin: 0; } .side-pack small, .side-pack button span, .track-tag { display: none; } .side-pack button { padding: 8px; width: auto; } }
+
+/* v4: system actions, wrap-up, hard checks */
+.actbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 20px; border-top: 1px solid var(--line); background: var(--sunk); }
+.actbar .k { font: 500 10.5px/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.actbar .btn.used { border-color: var(--good); color: var(--good); }
+.sysline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font: 500 12px/1.3 var(--f-mono); color: var(--muted); background: var(--sunk); border: 1px dashed var(--line); border-radius: 999px; padding: 5px 12px; }
+.sysline .i { width: 14px; height: 14px; color: var(--good); }
+.sys .locked { color: var(--muted); font-style: italic; padding: 6px 0; }
+.compose.wrap { display: grid; gap: 10px; }
+.compose.wrap .field { margin: 0; }
+.compose.wrap .field > span { font-size: 13px; font-weight: 600; }
+.compose.wrap select { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); width: 100%; }
+.compose.wrap textarea { width: 100%; min-height: 84px; }
+.failbox { margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: var(--bad-soft); border: 1px solid var(--bad); color: var(--ink); }
+.checks { display: grid; gap: 10px; margin-top: 14px; }
+.checks > div { display: flex; gap: 10px; align-items: flex-start; }
+.checks small { display: block; color: var(--muted); }
+@media (max-width: 640px) { .actbar { padding: 10px 14px; } .actbar .btn { flex: 1 1 calc(50% - 8px); } }

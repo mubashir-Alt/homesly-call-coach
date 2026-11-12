@@ -5,7 +5,7 @@
 //   bootstrap -> profile, UK date, course (levels + lessons, hidden guest notes removed); records attendance
 //   start     -> a unique scenario variant for this trainee (new, or the same one again) + the guest's first line
 //   guest     -> the AI guest's next line in a practice call
-//   assess    -> scores a finished practice call and saves it
+//   assess    -> scores a finished practice call (hidden test, auto-fail rules, wrap-up) and saves it
 //   drill     -> scores a drill answer and saves it
 //   summary   -> writes and saves today's coaching summary
 
@@ -29,6 +29,15 @@ class HttpError extends Error {
 }
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
+/* ---------- Signed guest lines ---------- */
+const enc = new TextEncoder();
+let hmacKey: CryptoKey | null = null;
+async function sign(variantId: string, text: string): Promise<string> {
+  hmacKey ??= await crypto.subtle.importKey("raw", enc.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "dev"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKey, enc.encode(variantId + "\n" + text)));
+  return Array.from(mac.slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /* ---------- Dates (UK) ---------- */
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -73,9 +82,10 @@ function findLesson(pack: Pack, id: string): { kind: "call"; t: Roleplay } | { k
 const levelOf = (pack: Pack, id: string) => pack.levels.find((l) => l.lessons.includes(id))?.id ?? 0;
 
 /** What the browser may see of a call variant (no hidden behaviour or twist). */
-function publicCall(t: Roleplay, v: CallVariant, today: string, id: string) {
+async function publicCall(t: Roleplay, v: CallVariant, today: string, id: string) {
   const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
   return {
+    firstSig: await sign(id, v.firstLine),
     variantId: id, kind: "call", lessonId: t.id, title: t.title, scenario: t.scenario, hotel: t.hotel, town: t.town, dir: t.dir, voice: t.voice,
     guest: guestName(t, v.name), persona: fill(t.persona, v.name), from: t.from, situation: t.situation ?? "", booking: bookingLines(t, v, today), nights: t.nights, adults: t.adults, children: t.children,
     arriveText: t.nights ? longDate(a) : "", departText: t.nights ? longDate(d) : "", rates: v.rates, kb: t.kb, targets: t.targets, firstLine: v.firstLine,
@@ -163,14 +173,41 @@ async function loadVariant(admin: SupabaseClient, id: unknown, userId: string) {
 }
 
 /* ---------- Input checks ---------- */
-type Turn = { who: "me" | "guest"; text: string };
-function cleanTurns(raw: unknown): Turn[] {
-  if (!Array.isArray(raw) || raw.length > 80) throw new HttpError(400, "Invalid call transcript.");
+type Turn = { who: "me" | "guest" | "action"; text: string; sig?: string };
+function cleanTurns(raw: unknown, pack: Pack): Turn[] {
+  if (!Array.isArray(raw) || raw.length > 140) throw new HttpError(400, "Invalid call transcript.");
   return raw.map((t) => {
     const who = (t as Turn)?.who, text = String((t as Turn)?.text ?? "").trim().slice(0, 1200);
-    if ((who !== "me" && who !== "guest") || !text) throw new HttpError(400, "Invalid call transcript.");
-    return { who, text };
+    if ((who !== "me" && who !== "guest" && who !== "action") || !text) throw new HttpError(400, "Invalid call transcript.");
+    if (who === "action" && !pack.actions.some((a) => a.id === text)) throw new HttpError(400, "Unknown system action.");
+    return { who, text, sig: typeof (t as Turn).sig === "string" ? (t as Turn).sig : undefined };
   });
+}
+/** Every guest line must be one the backend produced for this variant. */
+async function verifyGuestLines(variantId: string, turns: Turn[]) {
+  for (const t of turns) {
+    if (t.who !== "guest") continue;
+    if (!t.sig || t.sig !== (await sign(variantId, t.text))) throw new HttpError(400, "The guest's side of this call doesn't match what the AI said. Refresh the page and start the call again.");
+  }
+}
+const actionOf = (pack: Pack, id: string) => pack.actions.find((a) => a.id === id);
+const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+/** Facts worked out without the AI: turn length, questions per turn, prices quoted before a rate check. */
+function callMetrics(t: Roleplay, turns: Turn[]) {
+  const mine = turns.filter((x) => x.who === "me");
+  let checked = false, priceBeforeCheck = false;
+  for (const x of turns) {
+    if (x.who === "action" && x.text === "check_rate") checked = true;
+    if (x.who === "me" && !checked && t.rates.length && /£\s?\d|\d+\s?(pounds|quid)\b/i.test(x.text)) priceBeforeCheck = true;
+  }
+  return {
+    agentTurns: mine.length,
+    longTurns: mine.filter((x) => words(x.text) > 25).length,
+    multiQuestion: mine.filter((x) => (x.text.match(/\?/g) || []).length > 1).length,
+    longestTurn: mine.reduce((m, x) => Math.max(m, words(x.text)), 0),
+    priceBeforeCheck,
+    actions: turns.filter((x) => x.who === "action").map((x) => x.text),
+  };
 }
 
 /* ---------- Claude calls ---------- */
@@ -224,13 +261,26 @@ How to reply:
 - Reply only with the words you say out loud: one to three short sentences of natural British English. No stage directions, quotation marks or narration.
 - React realistically. If the agent is pushy or confusing, become cooler. If they ask for card details by phone, be suspicious. If they are clear and kind, warm up.
 - Never coach or help the agent, and never mention training, scoring or AI.
+- Only share details (your booking reference, mobile number, email, dates) when the agent asks for them. Don't volunteer them.
+- Bring up every point in "How you behave" naturally during the call, one at a time, unless the agent's answer already covers it or the call ends early. Don't end the call before you have tested them, unless you would genuinely hang up.
+- If the agent doesn't answer your question, or answers vaguely, ask again once in different words.
+- Stick to your situation. Don't invent new problems beyond "How you behave" and the extra detail.
+- Lines in square brackets like [A text has arrived] are things that just happened on your side. You only receive a text, link or email if such a line says so. If the agent says they've sent something and no such line appears, say you haven't received anything yet.
+- If the call goes on far too long without progress, politely wrap up.
 - When the call has clearly finished (goodbyes said, or you would hang up), end your reply with the tag [END].`;
 }
-function guestMessages(firstLine: string, turns: Turn[]): Anthropic.Beta.BetaMessageParam[] {
-  const msgs: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: "(The call connects.)" }];
-  const all = turns.length && turns[0].who === "guest" ? turns : [{ who: "guest" as const, text: firstLine }, ...turns];
-  for (const t of all) msgs.push({ role: t.who === "me" ? "user" : "assistant", content: t.text });
-  if (msgs[msgs.length - 1].role === "assistant") msgs.push({ role: "user", content: "(The agent pauses for a moment.)" });
+function guestMessages(pack: Pack, firstLine: string, turns: Turn[]): Anthropic.Beta.BetaMessageParam[] {
+  const msgs: { role: "user" | "assistant"; content: string }[] = [{ role: "user", content: "(The call connects.)" }];
+  const all: Turn[] = turns.length && turns[0].who === "guest" ? turns : [{ who: "guest", text: firstLine }, ...turns];
+  const push = (role: "user" | "assistant", content: string) => {
+    const last = msgs[msgs.length - 1];
+    if (last.role === role) last.content += "\n" + content; else msgs.push({ role, content });
+  };
+  for (const t of all) {
+    if (t.who === "action") { const a = actionOf(pack, t.text); if (a?.guestSees) push("user", `[${a.guestSees}]`); continue; }
+    push(t.who === "me" ? "user" : "assistant", t.text);
+  }
+  if (msgs[msgs.length - 1].role === "assistant") push("user", "(The agent pauses for a moment.)");
   return msgs;
 }
 
@@ -238,8 +288,11 @@ const coachSystem = (p: Pack) => p.id === "support"
   ? "You are an experienced, fair and encouraging hotel guest-support coach for Homesly, a group of independent UK hotels. You are strict about compliance: verification and privacy, card details, invented facts, refunds or freebies promised without approval, and safety escalation. Write in plain British English."
   : "You are an experienced, fair and encouraging hotel reservations coach for Homesly, a group of independent UK hotels. You are strict about compliance: card details, live prices, invented facts and privacy. Write in plain British English.";
 
-function assessPrompt(pack: Pack, t: Roleplay, v: CallVariant, turns: Turn[], today: string): string {
-  const transcript = turns.map((x) => (x.who === "me" ? "AGENT: " : "OTHER PERSON: ") + x.text).join("\n");
+type Wrap = { outcome: string; summary: string };
+type Metrics = ReturnType<typeof callMetrics>;
+function assessPrompt(pack: Pack, t: Roleplay, v: CallVariant, turns: Turn[], today: string, wrap: Wrap, m: Metrics): string {
+  const transcript = turns.map((x) => x.who === "action" ? `[SYSTEM: agent ${(actionOf(pack, x.text)?.log || x.text).replace(/^./, (c) => c.toLowerCase())}]` : (x.who === "me" ? "AGENT: " : "OTHER PERSON: ") + x.text).join("\n");
+  const hasRate = pack.actions.some((a) => a.id === "check_rate") && t.rates.length > 0;
   return `Score this practice call.
 
 SCENARIO: ${t.scenario}: "${t.title}". Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}. ${t.dir === "out" ? "Outbound: the agent called the guest (the guest answered first)." : "Inbound: the person called the hotel and spoke first."}
@@ -251,12 +304,24 @@ ${rateLines(t, v, today).join("\n")}
 Knowledge base:
 ${Object.entries(t.kb).map(([k, val]) => `${k}: ${val}`).join("\n") || "(nothing)"}
 Anything marked "Not in knowledge base" must not be answered from memory; the right move is "I'll check that with the team and text you back".
+${hasRate ? "The live rate panel was hidden until the agent ran check_rate (shown as a SYSTEM line). Any price said before that line was from memory." : ""}
+SYSTEM lines are real actions the agent took in the system (e.g. a text actually sent). Saying "I've sent you a link" without a matching SYSTEM line means nothing was sent.
+
+THE HIDDEN TEST OF THIS SCENARIO (the guest was told to behave like this; the agent could not see it):
+${fill(t.behaviour, v.name)}
+${t.pass ? "To pass the test: " + t.pass : "Work out what the right handling of this test is from the rules and the scenario."}
 
 RULES (score each one):
 ${pack.criteria.map((c) => `- ${c.id}: ${c.tip}`).join("\n")}
 
 TRANSCRIPT (typed or dictated; ignore small dictation errors):
 ${transcript}
+
+MEASURED FACTS: ${m.agentTurns} agent turns; ${m.longTurns} over 25 words (longest ${m.longestTurn}); ${m.multiQuestion} with more than one question.${m.priceBeforeCheck ? " The agent said a price BEFORE running check_rate." : ""}
+
+THE AGENT'S WRAP-UP (written after the call):
+Outcome chosen: ${pack.outcomes.find((o) => o.id === wrap.outcome)?.label ?? wrap.outcome}
+Notes: ${wrap.summary || "(none)"}
 
 Scoring guidance:
 - Mark each rule "met", "partial", "missed" or "na" (did not come up). Include every rule once.
@@ -268,6 +333,10 @@ ${pack.id === "support"
   : `- An outbound call where the agent never says the hotel name and that the line is recorded is "missed" for disclosure.
 - Quoting a price or total not on the live rate panel, or a wrong total, is "missed" for live_price.
 - Asking for or accepting card details is "missed" for no_card.`}
+- wrap_up: "met" if the chosen outcome matches what really happened and the notes are an accurate, actionable two-sentence summary; "partial" if one is off or the notes are thin; "missed" if the outcome is wrong or the notes are missing or inaccurate.
+- clarity: use the measured facts. Several turns over 25 words or with stacked questions cannot be "met".
+- test_passed: true only if the agent handled the hidden test the right way. test_note: one sentence on how they handled it.
+- outcome: what actually happened on the call (which may differ from the agent's choice).
 - score is 0 to 100 overall.
 - better_lines: up to 3 of the agent's weakest moments. "original" quotes the agent exactly; "better" is under 30 words; "why" under 12 words.
 - strengths: up to 2. improvements: up to 3 short, specific actions. summary: two sentences.`;
@@ -275,10 +344,12 @@ ${pack.id === "support"
 function assessSchema(pack: Pack) {
   return {
     type: "object", additionalProperties: false,
-    required: ["score", "outcome", "summary", "criteria", "strengths", "improvements", "better_lines"],
+    required: ["score", "outcome", "test_passed", "test_note", "summary", "criteria", "strengths", "improvements", "better_lines"],
     properties: {
       score: { type: "integer" },
-      outcome: { type: "string", enum: ["booked", "link-sent", "callback-scheduled", "transferred", "message-taken", "not-interested", "wrong-number", "resolved", "escalated", "no-outcome"] },
+      outcome: { type: "string", enum: pack.outcomes.map((o) => o.id) },
+      test_passed: { type: "boolean" },
+      test_note: { type: "string" },
       summary: { type: "string" },
       criteria: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "result", "note"], properties: { id: { type: "string", enum: pack.criteria.map((c) => c.id) }, result: { type: "string", enum: ["met", "partial", "missed", "na"] }, note: { type: "string" } } } },
       strengths: { type: "array", items: { type: "string" } },
@@ -304,7 +375,7 @@ const clampScore = (n: unknown) => Math.max(0, Math.min(100, Math.round(Number(n
 /** Course as the browser sees it: hidden guest behaviour removed. */
 function publicPack(p: Pack) {
   return {
-    id: p.id, name: p.name, description: p.description, systemLabel: p.systemLabel ?? "Live system", passMark: p.passMark, dailyGoal: p.dailyGoal, criteria: p.criteria, levels: p.levels,
+    id: p.id, name: p.name, description: p.description, systemLabel: p.systemLabel ?? "Live system", passMark: p.passMark, dailyGoal: p.dailyGoal, criteria: p.criteria, critical: p.critical, outcomes: p.outcomes, actions: p.actions.map(({ id, label }) => ({ id, label })), levels: p.levels,
     lessons: [
       ...p.roleplays.map((r) => ({ id: r.id, kind: "call", title: r.title, subtitle: `${r.scenario} · ${r.hotel}${r.town ? ", " + r.town : ""}`, from: r.from, minutes: 4, targets: r.targets, dir: r.dir })),
       ...p.drills.map((d) => ({ id: d.id, kind: "drill", title: d.title, subtitle: "Quick drill", from: d.from, minutes: 1, targets: d.targets })),
@@ -342,12 +413,12 @@ Deno.serve(async (req) => {
         if (body.variantId) {
           const v = await loadVariant(admin, body.variantId, user.id);
           if (v.row.lesson_id !== lessonId) throw new HttpError(400, "That scenario belongs to another lesson.");
-          return json({ variant: lesson.kind === "call" ? publicCall(lesson.t as Roleplay, v.row.data as CallVariant, today, v.row.id) : publicDrill(lesson.t as Drill, v.row.data as DrillVariant, v.row.id) });
+          return json({ variant: lesson.kind === "call" ? await publicCall(lesson.t as Roleplay, v.row.data as CallVariant, today, v.row.id) : publicDrill(lesson.t as Drill, v.row.data as DrillVariant, v.row.id) });
         }
         await bumpUsage(admin, user.id, today);
         if (lesson.kind === "call") {
           const v = await createCallVariant(admin, pack, lesson.t, user.id);
-          return json({ variant: publicCall(lesson.t, v.data, today, v.id) });
+          return json({ variant: await publicCall(lesson.t, v.data, today, v.id) });
         }
         const v = await createDrillVariant(admin, pack, lesson.t, user.id);
         return json({ variant: publicDrill(lesson.t, v.data, v.id) });
@@ -356,28 +427,41 @@ Deno.serve(async (req) => {
       case "guest": {
         const { row, pack, lesson } = await loadVariant(admin, body.variantId, user.id);
         if (lesson.kind !== "call") throw new HttpError(400, "Not a practice call.");
-        const turns = cleanTurns(body.turns);
+        const turns = cleanTurns(body.turns, pack);
         await bumpUsage(admin, user.id, today);
         const v = row.data as CallVariant;
-        let text = await askText(guestSystem(pack, lesson.t, v, today), guestMessages(v.firstLine, turns), "low");
+        let text = await askText(guestSystem(pack, lesson.t, v, today), guestMessages(pack, v.firstLine, turns), "low");
         const ended = /\[END\]/i.test(text);
-        text = text.replace(/\[END\]/gi, "").trim();
-        return json({ text, ended });
+        text = text.replace(/\[END\]/gi, "").replace(/^\[[^\]]*\]\s*/, "").trim() || "Sorry, are you still there?";
+        return json({ text, ended, sig: await sign(row.id, text) });
       }
 
       case "assess": {
         const { row, pack, lesson } = await loadVariant(admin, body.variantId, user.id);
         if (lesson.kind !== "call") throw new HttpError(400, "Not a practice call.");
-        const turns = cleanTurns(body.turns);
+        const turns = cleanTurns(body.turns, pack);
         if (!turns.some((x) => x.who === "me")) throw new HttpError(400, "Say something on the call before asking for feedback.");
+        await verifyGuestLines(row.id, turns);
+        const w = (body.wrap ?? {}) as Partial<Wrap>;
+        const wrap: Wrap = { outcome: pack.outcomes.some((o) => o.id === w.outcome) ? String(w.outcome) : "no-outcome", summary: String(w.summary ?? "").trim().slice(0, 600) };
         await bumpUsage(admin, user.id, today);
         const t = lesson.t, v = row.data as CallVariant;
-        type Fb = { score: number; outcome: string; summary: string; criteria: { id: string; result: string; note: string }[]; strengths: string[]; improvements: string[]; better_lines: { original: string; better: string; why: string }[] };
-        const fb = await askJson<Fb>(coachSystem(pack), assessPrompt(pack, t, v, turns, today), assessSchema(pack), "medium");
+        const m = callMetrics(t, turns);
+        type Fb = { score: number; outcome: string; test_passed: boolean; test_note: string; summary: string; criteria: { id: string; result: string; note: string }[]; strengths: string[]; improvements: string[]; better_lines: { original: string; better: string; why: string }[] };
+        const fb = await askJson<Fb>(coachSystem(pack), assessPrompt(pack, t, v, turns, today, wrap, m), assessSchema(pack), "medium");
+        // Hard gates: a missed critical rule, a failed scenario test or a price from memory fails the call whatever the score.
+        const crit = new Map(fb.criteria.map((c) => [c.id, c]));
+        if (m.priceBeforeCheck && crit.get("live_price")) crit.get("live_price")!.result = "missed";
+        const fails = pack.critical.filter((id) => crit.get(id)?.result === "missed").map((id) => pack.criteria.find((c) => c.id === id)!.label);
+        if (!fb.test_passed) fails.push("Scenario test not passed");
+        if (m.priceBeforeCheck && !fails.includes("Live prices only")) fails.push("Price quoted before checking the live rate");
+        const raw = clampScore(fb.score);
+        const score = fails.length ? Math.min(raw, pack.passMark - 15) : raw;
         const insert = {
-          user_id: user.id, pack: pack.id, kind: "roleplay", item_id: t.id, title: t.title, score: clampScore(fb.score), level: levelOf(pack, t.id), variant_id: row.id,
+          user_id: user.id, pack: pack.id, kind: "roleplay", item_id: t.id, title: t.title, score, level: levelOf(pack, t.id), variant_id: row.id,
           outcome: fb.outcome, summary: fb.summary, criteria: fb.criteria, strengths: fb.strengths.slice(0, 2), improvements: fb.improvements.slice(0, 3),
-          better_lines: fb.better_lines.slice(0, 3), transcript: turns, targets: t.targets, day: today,
+          better_lines: fb.better_lines.slice(0, 3), transcript: turns.map(({ who, text }) => ({ who, text })), targets: t.targets, day: today,
+          checks: { fails, rawScore: raw, test: { passed: !!fb.test_passed, note: fb.test_note }, wrap, metrics: m },
         };
         const { data, error } = await admin.from("attempts").insert(insert).select().single();
         if (error) throw new HttpError(500, "Your score was worked out but could not be saved.");

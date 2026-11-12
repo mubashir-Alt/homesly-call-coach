@@ -66,6 +66,13 @@ const lessonById = (id) => pack().lessons.find((l) => l.id === id);
 const crit = (id) => pack()?.criteria.find((c) => c.id === id) || { id, label: id, tip: "" };
 const isManager = () => S.profile?.role === "manager";
 const trackShort = (p) => (p.id === "support" ? "Support" : "Sales");
+const actLabel = (id) => pack()?.actions?.find((a) => a.id === id)?.label || id;
+const bubble = (t, guestLabel, meLabel) => t.who === "action"
+  ? `<div class="sysline">${icon("check")}${esc(actLabel(t.text))}</div>`
+  : `<div class="bubble ${t.who === "me" ? "me" : "guest"}"><span class="who2">${t.who === "me" ? meLabel : esc(guestLabel)}</span>${esc(t.text)}</div>`;
+const usedAct = (c, id) => c.turns.some((t) => t.who === "action" && t.text === id);
+/** Actions offered on this call: rate check only when there's a rate, booking lookup only when there's a booking. */
+const callActions = (v) => (pack().actions || []).filter((a) => (a.id !== "check_rate" || v.rates.length) && (a.id !== "find_booking" || v.booking?.length));
 
 /* ---------- Backend ---------- */
 async function api(action, payload = {}) {
@@ -481,7 +488,7 @@ async function startLesson(lessonId, variantId) {
     if (S.call !== c) return;
     c.variant = r.variant; c.connecting = false; c.busy = false; c.startedAt = Date.now();
     if (c.kind === "call") {
-      c.turns.push({ who: "guest", text: c.variant.firstLine });
+      c.turns.push({ who: "guest", text: c.variant.firstLine, sig: c.variant.firstSig });
       render(); startTimer();
       await speak(c.variant.firstLine, c.variant.voice);
       if (S.call === c && c.handsFree) startListening();
@@ -497,7 +504,7 @@ async function guestTurn() {
   try {
     const r = await api("guest", { variantId: c.variant.variantId, turns: c.turns });
     if (S.call !== c) return;
-    if (r.text) c.turns.push({ who: "guest", text: r.text });
+    if (r.text) c.turns.push({ who: "guest", text: r.text, sig: r.sig });
     c.ended = !!r.ended; c.busy = false; render();
     if (r.text) await speak(r.text, c.variant.voice);
     if (S.call === c && c.handsFree && !c.ended) startListening();
@@ -512,11 +519,23 @@ function send() {
   c.turns.push({ who: "me", text }); box.value = "";
   if (c.kind === "call") guestTurn(); else scoreDrill(text);
 }
+function openWrap() { const c = S.call; stopVoice(); c.wrapping = true; c.err = ""; render(); }
+function doAction(id) {
+  const c = S.call; if (!c || c.busy || c.result || c.scoring) return;
+  if ((id === "check_rate" || id === "find_booking") && usedAct(c, id)) { c.tab = "system"; render(); return; }
+  c.turns.push({ who: "action", text: id });
+  if (id === "check_rate" || id === "find_booking") c.tab = "system";
+  render();
+}
 async function scoreCall() {
-  const c = S.call; stopVoice(); stopTimer();
+  const c = S.call;
+  const outcome = $("#wrapOutcome")?.value || "", summary = ($("#wrapNotes")?.value || "").trim();
+  if (!outcome || summary.split(/\s+/).filter(Boolean).length < 6) { c.wrapErr = "Pick the outcome and write a short summary (two sentences) first."; render(); return; }
+  c.wrap = { outcome, summary }; c.wrapErr = "";
+  stopVoice(); stopTimer();
   c.busy = true; c.scoring = true; c.err = ""; render();
   try {
-    const r = await api("assess", { variantId: c.variant.variantId, turns: c.turns });
+    const r = await api("assess", { variantId: c.variant.variantId, turns: c.turns, wrap: c.wrap });
     if (S.call !== c) return;
     c.result = r.attempt; S.attempts.unshift(r.attempt); S.dayNote = null;
   } catch (e) { if (S.call === c) c.err = e.message; }
@@ -553,31 +572,40 @@ function renderPlayer(app) {
     const tabs = [["brief", "Brief"], ["system", pack().systemLabel || "Live system"], ["rules", "Scoring"]];
     let body = "";
     if (c.tab === "brief") body = `<div class="brief"><p class="eyebrow">${esc(v.scenario)} · ${v.dir === "out" ? "You called them" : "They called you"}</p><h2 style="font-size:20px">${esc(v.title)}</h2>
-      <p><b>${esc(v.hotel)}${v.town ? ", " + esc(v.town) : ""}</b></p><p>${v.dir === "out" ? `You're calling <b>${esc(v.guest)}</b>, who started a booking on the website but didn't finish. They've just picked up.` : `<b>${esc(v.guest)}</b> is calling the hotel.${v.booking?.length ? " Open the <b>" + esc(pack().systemLabel || "Live system") + "</b> tab to find their booking." : ""}`}</p>
+      <p><b>${esc(v.hotel)}${v.town ? ", " + esc(v.town) : ""}</b></p><p>${v.dir === "out" ? `You're calling <b>${esc(v.guest)}</b>, who started a booking on the website but didn't finish. They've just picked up.` : `<b>${esc(v.guest)}</b> is calling the hotel.${v.booking?.length ? " Verify who they are, then press <b>Open booking</b> to look them up." : ""}`}</p>
       ${v.nights && !v.booking?.length ? `<p class="muted">Enquiry: ${esc(v.arriveText)}, ${v.nights} night${v.nights > 1 ? "s" : ""}, ${v.adults} adult${v.adults > 1 ? "s" : ""}${v.children.length ? ", child aged " + v.children.join(", ") : ""}.</p>` : ""}
+      <p class="notice" style="font-size:13.5px">Work it like the real system: use the buttons under the call. <b>${v.rates.length ? "Check the live rate before you say any price" : "Open the booking before you discuss it"}</b>, and only say a link was sent after you press the button. When the call ends you'll pick the outcome and write the notes.</p>
       <p class="muted" style="font-size:13px">Based on: ${esc(v.from)}</p></div>`;
-    if (c.tab === "system") body = `<div class="sys">${v.booking?.length ? '<div class="k">— booking —</div>' + v.booking.map((l) => { const i = l.indexOf(": "); return `<div><span class="k">${esc(l.slice(0, i))}:</span> ${esc(l.slice(i + 2))}</div>`; }).join("") + (v.rates.length ? '<div class="k">— live rate —</div>' : "") : ""}${rateLines(v).map((l) => `<div>${esc(l)}</div>`).join("")}${Object.keys(v.kb).length ? '<div class="k">— knowledge base —</div>' + Object.entries(v.kb).map(([k, x]) => `<div><span class="k">${esc(k)}:</span> ${esc(x)}</div>`).join("") : ""}</div><p class="muted" style="font-size:12.5px;margin:10px 0 0">Practice values for this scenario only. Quote only what's here; if a fact isn't here, say you'll check with the team.</p>`;
+    const acts = callActions(v), needBook = acts.some((a) => a.id === "find_booking"), needRate = acts.some((a) => a.id === "check_rate");
+    const showBook = !needBook || usedAct(c, "find_booking"), showRate = !needRate || usedAct(c, "check_rate");
+    if (c.tab === "system") body = `<div class="sys">${v.booking?.length ? '<div class="k">— booking —</div>' + (showBook ? v.booking.map((l) => { const i = l.indexOf(": "); return `<div><span class="k">${esc(l.slice(0, i))}:</span> ${esc(l.slice(i + 2))}</div>`; }).join("") : '<div class="locked">Press <b>Open booking</b> under the call to look the guest up.</div>') + (v.rates.length ? '<div class="k">— live rate —</div>' : "") : ""}${showRate ? rateLines(v).map((l) => `<div>${esc(l)}</div>`).join("") : `${v.booking?.length ? "" : '<div class="k">— live rate —</div>'}<div class="locked">Press <b>Check live rate</b> under the call to see today's prices.</div>`}${Object.keys(v.kb).length ? '<div class="k">— knowledge base —</div>' + Object.entries(v.kb).map(([k, x]) => `<div><span class="k">${esc(k)}:</span> ${esc(x)}</div>`).join("") : ""}</div><p class="muted" style="font-size:12.5px;margin:10px 0 0">Practice values for this scenario only. Quote only what's here; if a fact isn't here, say you'll check with the team.</p>`;
     if (c.tab === "rules") body = `<ul class="rules">${pack().criteria.map((x) => `<li${v.targets.includes(x.id) ? ' style="font-weight:600"' : ""}>${esc(x.label)}: ${esc(x.tip)}</li>`).join("")}</ul><p class="muted" style="font-size:12.5px">Bold = the focus of this lesson.</p>`;
     left = `<div class="card"><div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${c.tab === k}">${l}</button>`).join("")}</div>${body}</div>`;
-    const thread = c.turns.map((t) => `<div class="bubble ${t.who === "me" ? "me" : "guest"}"><span class="who2">${t.who === "me" ? "You" : esc(v.guest.split(" (")[0])}</span>${esc(t.text)}</div>`).join("");
+    const thread = c.turns.map((t) => bubble(t, v.guest.split(" (")[0], "You")).join("");
     const myTurns = c.turns.filter((t) => t.who === "me").length;
     if (c.result) {
       right = resultCard(c.result, ls.id, v.variantId) + `<details class="card"><summary style="cursor:pointer;font-weight:600">Call transcript</summary><div class="thread" style="margin-top:12px;border-radius:10px">${thread}</div></details>`;
     } else {
       const status = c.scoring ? "Scoring your call…" : c.ended ? "Call ended" : c.busy ? `${esc(v.guest.split(" (")[0])} is talking…` : voice.on ? "Listening…" : "On call";
       right = `<div class="card callcard"><div class="callbar">${avatar(v.guest, v.guest)}<div class="who"><b>${esc(v.guest.split(" (")[0])}</b><small>${status} · ${esc(v.hotel)}</small></div><span class="eq" id="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="timer" id="timer">00:00</span></div>
-        <div class="thread" id="thread">${thread}${c.busy && !c.scoring ? '<div class="typing">…</div>' : ""}${c.scoring ? '<div class="typing">Scoring your call against the Core Rules. This can take up to a minute.</div>' : ""}${c.ended && !c.scoring ? '<div class="typing">The guest has ended the call. Press "End call & get feedback".</div>' : ""}</div>
+        <div class="thread" id="thread">${thread}${c.busy && !c.scoring ? '<div class="typing">…</div>' : ""}${c.scoring ? '<div class="typing">Scoring your call against the Core Rules. This can take up to a minute.</div>' : ""}${c.ended && !c.scoring && !c.wrapping ? '<div class="typing">The guest has ended the call. Log anything you need with the buttons below, then press "End call & wrap up".</div>' : ""}</div>
         ${c.err ? `<div class="notice warn" style="margin:0 20px 10px">${esc(c.err)}</div>` : ""}
+        ${c.wrapping ? `<div class="compose wrap"><h3 style="margin:0">Wrap-up</h3><p class="muted" style="margin:0;font-size:13.5px">As on the real system: one outcome and a two-sentence note the next colleague can act on. This is scored too.</p>
+          <label class="field"><span>Outcome</span><select id="wrapOutcome"><option value="">Choose…</option>${(pack().outcomes || []).map((o) => `<option value="${esc(o.id)}" ${c.wrap?.outcome === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
+          <label class="field"><span>Call notes</span><textarea id="wrapNotes" placeholder="e.g. Guest needs to check dates with her husband. Sent the secure link by text; she'll book tonight.">${esc(c.wrap?.summary || "")}</textarea></label>
+          ${c.wrapErr ? `<p class="msg err">${esc(c.wrapErr)}</p>` : ""}
+          <div class="row">${c.ended ? "" : `<button class="btn ghost" id="backCall" ${c.busy ? "disabled" : ""}>${icon("back")}Back to the call</button>`}<span class="grow"></span><button class="btn primary" id="score" ${c.busy ? "disabled" : ""}>${icon("check")}${c.scoring ? "Scoring…" : "Submit & get feedback"}</button></div></div>` : `
+        <div class="actbar" aria-label="System actions"><span class="k">${esc(pack().systemLabel || "System")}</span>${callActions(v).map((a) => `<button class="btn small ${usedAct(c, a.id) ? "used" : ""}" data-act="${esc(a.id)}" ${c.busy ? "disabled" : ""}>${usedAct(c, a.id) ? icon("check") : ""}${esc(a.label)}</button>`).join("")}</div>
         <div class="compose">
           ${c.ended ? "" : `<textarea id="say" placeholder="Your reply… (speak or type)" ${c.busy ? "disabled" : ""}></textarea><div class="row"><span id="listening" class="listening" hidden>Listening</span><span id="partial" class="muted" style="font-size:13px"></span></div><p id="micnote" class="msg err" hidden></p>`}
           <div class="row">
             ${!c.ended && SR ? `<button class="btn micbtn" id="mic" ${c.busy ? "disabled" : ""} aria-label="Speak">${icon("mic")}</button>` : ""}
             ${c.ended ? "" : `<button class="btn primary" id="send" ${c.busy ? "disabled" : ""}>${icon("send")}Send</button>`}
             <span class="grow"></span>
-            <button class="btn danger" id="end" ${c.busy || myTurns < 1 ? "disabled" : ""}>${icon("end")}End call &amp; get feedback</button>
+            <button class="btn danger" id="end" ${c.busy || myTurns < 1 ? "disabled" : ""}>${icon("end")}End call &amp; wrap up</button>
           </div>
           <div class="toggles">${window.speechSynthesis ? `<label class="tog"><input type="checkbox" id="speakT" ${c.speakOn ? "checked" : ""}> Guest speaks aloud</label>` : ""}${SR ? `<label class="tog"><input type="checkbox" id="handsT" ${c.handsFree ? "checked" : ""}> Hands-free (mic opens after the guest, sends when you pause)</label>` : '<span class="muted" style="font-size:12.5px">Voice input needs Chrome or Edge. On Windows, Windows key + H dictates into the box.</span>'}</div>
-        </div></div>`;
+        </div>`}</div>`;
     }
   } else {
     left = `<div class="card"><p class="eyebrow">Quick drill · ${esc(v.from)}</p><h2 style="font-size:20px">${esc(v.title)}</h2><p><b>On the real call:</b> <span class="muted">${esc(v.was)}</span></p><h3 style="margin-top:14px">Rules for this one</h3><ul class="rules">${v.targets.map((t) => `<li>${esc(crit(t).tip)}</li>`).join("")}</ul></div>`;
@@ -594,7 +622,8 @@ function renderPlayer(app) {
   const say = $("#say");
   if (say) { say.onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } }; if (!c.busy && !voice.on && !reduceMotion()) say.focus({ preventScroll: true }); }
   const on = (id, fn) => { const el = $("#" + id); if (el) el.onclick = fn; };
-  on("send", send); on("end", scoreCall);
+  on("send", send); on("end", openWrap); on("score", scoreCall); on("backCall", () => { c.wrapping = false; render(); });
+  app.querySelectorAll("[data-act]").forEach((b) => (b.onclick = () => doAction(b.dataset.act)));
   on("mic", () => { if (voice.on) stopListening(); else { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } setEq(false); startListening(); } });
   const st = $("#speakT"); if (st) st.onchange = () => { c.speakOn = st.checked; store.set("speak", st.checked); if (!st.checked) { window.speechSynthesis?.cancel(); setEq(false); } };
   const hf = $("#handsT"); if (hf) hf.onchange = () => { c.handsFree = hf.checked; store.set("handsFree", hf.checked); };
@@ -623,9 +652,17 @@ function feedbackHtml(a, passed = a.score >= pack().passMark, passMark = pack().
     return top + `<div class="grid2" style="margin-top:16px"><div><h3>What worked</h3><p style="margin:0">${esc((a.strengths || [])[0])}</p></div><div><h3>Fix</h3><p style="margin:0">${esc((a.improvements || [])[0])}</p></div></div>
       ${lines[0] ? `<div class="better"><small class="muted">A strong answer</small><div class="now">${esc(lines[0].better)}</div></div>` : ""}`;
   }
+  const ck = a.checks;
+  const outLabel = (id) => (pack().outcomes || []).find((o) => o.id === id)?.label || id;
+  const checksHtml = !ck ? "" : `${ck.fails?.length ? `<div class="failbox"><b>Automatic fail</b> (score capped below ${passMark}${ck.rawScore > a.score ? `, was ${ck.rawScore}` : ""}): ${ck.fails.map(esc).join(" · ")}</div>` : ""}
+    <div class="checks">
+      <div><span class="chip ${ck.test?.passed ? "good" : "bad"}">${ck.test?.passed ? "Passed" : "Not passed"}</span><div><strong>Scenario test</strong><small>${esc(ck.test?.note || "")}</small></div></div>
+      ${ck.wrap ? `<div><span class="chip ${ck.wrap.outcome === a.outcome ? "good" : "warn"}">${ck.wrap.outcome === a.outcome ? "Matches" : "Differs"}</span><div><strong>Your outcome: ${esc(outLabel(ck.wrap.outcome))}</strong><small>What happened: ${esc(outLabel(a.outcome))}. Notes: ${esc(ck.wrap.summary)}</small></div></div>` : ""}
+      ${ck.metrics ? `<div><span class="chip ${ck.metrics.longTurns || ck.metrics.multiQuestion ? "warn" : "good"}">${ck.metrics.agentTurns} turns</span><div><strong>Turn length</strong><small>${ck.metrics.longTurns} over 25 words (longest ${ck.metrics.longestTurn}), ${ck.metrics.multiQuestion} with stacked questions. System actions: ${ck.metrics.actions.length ? ck.metrics.actions.map((x) => esc(actLabel(x))).join(", ") : "none"}.</small></div></div>` : ""}
+    </div>`;
   const order = { missed: 0, partial: 1, met: 2, na: 3 };
   const cr = [...(a.criteria || [])].sort((x, y) => order[x.result] - order[y.result]);
-  return top + `${lines.length ? '<h3 style="margin-top:18px">Say it better</h3>' + lines.map((b) => `<div class="better"><div class="was">${esc(b.original)}</div><div class="now">${esc(b.better)}</div>${b.why ? `<small class="muted">${esc(b.why)}</small>` : ""}</div>`).join("") : ""}
+  return top + checksHtml + `${lines.length ? '<h3 style="margin-top:18px">Say it better</h3>' + lines.map((b) => `<div class="better"><div class="was">${esc(b.original)}</div><div class="now">${esc(b.better)}</div>${b.why ? `<small class="muted">${esc(b.why)}</small>` : ""}</div>`).join("") : ""}
     <div class="grid2" style="margin-top:14px"><div><h3>Keep doing</h3><ul class="tight">${(a.strengths || []).map((x) => `<li>${esc(x)}</li>`).join("") || '<li class="muted">–</li>'}</ul></div><div><h3>Fix next</h3><ul class="tight">${(a.improvements || []).map((x) => `<li>${esc(x)}</li>`).join("") || '<li class="muted">–</li>'}</ul></div></div>
     <h3 style="margin-top:14px">Core Rules check</h3><ul class="crit">${cr.map((x) => `<li>${resultChip(x.result)}<div><strong>${esc(crit(x.id).label)}</strong>${x.note ? `<small>${esc(x.note)}</small>` : ""}</div></li>`).join("")}</ul>`;
 }
@@ -660,7 +697,7 @@ function renderProgress(app, all, checkins, heading, intro = "") {
   app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => {
     const a = rows[Number(b.dataset.open)], box = $("#detail", app);
     box.innerHTML = `<section class="card"><div class="card-head"><h3>${esc(a.title)} · ${esc(prettyKey(a.day))}</h3><button class="btn small" id="closeD">Close</button></div>${feedbackHtml(a)}
-      ${a.transcript?.length ? `<h3 style="margin-top:16px">Transcript</h3><div class="thread" style="border-radius:10px">${a.transcript.map((t) => `<div class="bubble ${t.who === "me" ? "me" : "guest"}"><span class="who2">${t.who === "me" ? "Agent" : "Guest"}</span>${esc(t.text)}</div>`).join("")}</div>` : ""}</section>`;
+      ${a.transcript?.length ? `<h3 style="margin-top:16px">Transcript</h3><div class="thread" style="border-radius:10px">${a.transcript.map((t) => bubble(t, "Guest", "Agent")).join("")}</div>` : ""}</section>`;
     $("#closeD", box).onclick = () => (box.innerHTML = "");
     box.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
   }));
@@ -769,7 +806,7 @@ function renderGuide(app) {
     <section class="card"><span class="lesson-ico drill">${icon("star")}</span><h3 style="margin-top:12px">Your own scenario</h3><p class="muted" style="margin:0">Every attempt creates a fresh guest, dates, prices and twist just for you. Colleagues never get the same call, so practise, don't copy.</p></section></div>
   <section class="card"><h3>Attendance and your daily goal</h3><p style="margin:0">Do <b>${p.dailyGoal} sessions a day</b> to meet your goal. The calendar shows <b>goal met</b>, <b>practised</b> (1–${p.dailyGoal - 1} sessions), <b>logged in only</b>, or <b>absent</b>. Managers see everyone's attendance and scores in the Team page.</p></section>
   <section class="card"><h3>What gets scored</h3><ul class="rules">${p.criteria.map((c) => `<li><b>${esc(c.label)}:</b> ${esc(c.tip)}</li>`).join("")}</ul></section>
-  <section class="card"><h3>Tips</h3><ul class="rules"><li>Use Chrome or Edge with a headset, and allow the microphone when asked.</li><li>Quote only what's in the <b>Live system</b> tab. If a fact isn't there, say you'll check with the team and text back.</li><li>Never take card details by phone, even in practice.</li><li>"Retry same scenario" replays your call; "New scenario" creates a different one.</li></ul>
+  <section class="card"><h3>Tips</h3><ul class="rules"><li>Use Chrome or Edge with a headset, and allow the microphone when asked.</li><li>Quote only what's in the <b>${esc(p.systemLabel || "Live system")}</b> tab, and press <b>Check live rate</b> before any price. If a fact isn't there, say you'll check with the team and text back.</li><li>The buttons under the call work like the real system: a link only reaches the guest if you press <b>Text secure link</b>.</li><li>Some rules fail a call outright, whatever the score: ${esc((p.critical || []).map((id) => p.criteria.find((c) => c.id === id)?.label || id).join(", "))}, and the scenario's hidden test.</li><li>After each call, pick the outcome and write two-sentence notes. They're scored.</li><li>Never take card details by phone, even in practice.</li><li>"Retry same scenario" replays your call; "New scenario" creates a different one.</li></ul>
   <p class="muted" style="font-size:13px;margin-bottom:0">The coach scores the words you say, not your accent. Practice prices and facts are made up for training.</p></section>`;
 }
 

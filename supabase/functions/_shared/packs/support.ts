@@ -40,6 +40,27 @@ const pack: Pack = {
     { id: "no_card", label: "No card by phone", tip: "Never take card details by phone. Payments and refunds go through the secure link or the original payment method." },
     { id: "close", label: "Close", tip: "Summarise what was agreed and ask \"Is there anything else I can help with?\"" },
     { id: "clarity", label: "Clarity & tone", tip: "Calm, short turns, one question at a time, warm British English." },
+    { id: "wrap_up", label: "Wrap-up notes", tip: "After the call, pick the one right outcome and write a two-sentence note the next colleague can act on." },
+  ],
+  // Missing any of these fails the call, whatever the score.
+  critical: ["no_card", "verification", "resolution", "escalation"],
+  outcomes: [
+    { id: "resolved", label: "Resolved on the call" },
+    { id: "amended", label: "Booking amended" },
+    { id: "link-sent", label: "Secure payment link sent" },
+    { id: "task-created", label: "Task logged for the team" },
+    { id: "escalated", label: "Escalated to duty manager" },
+    { id: "callback-scheduled", label: "Callback agreed" },
+    { id: "transferred", label: "Transferred" },
+    { id: "no-outcome", label: "No outcome" },
+  ],
+  actions: [
+    { id: "find_booking", label: "Open booking", log: "Ran find_booking: the booking is now on screen" },
+    { id: "check_rate", label: "Check live rate", log: "Ran check_rate: the live rate panel is now on screen" },
+    { id: "send_link", label: "Text secure payment link", log: "Sent the secure payment link by text", guestSees: "A text from the hotel has just arrived on your phone with a secure payment link." },
+    { id: "send_confirmation", label: "Email confirmation", log: "Emailed the guest a written confirmation", guestSees: "An email from the hotel has just arrived confirming what was agreed." },
+    { id: "create_task", label: "Log task for the team", log: "Logged a task for the hotel team" },
+    { id: "escalate", label: "Escalate to duty manager", log: "Escalated to the duty manager" },
   ],
   roleplays: [
     /* ---------- Level 1 ---------- */

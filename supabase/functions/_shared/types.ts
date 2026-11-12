@@ -35,6 +35,8 @@ export interface Roleplay {
   /** Hidden from trainees. Only the AI guest sees this. "{name}" is replaced. */
   behaviour: string;
   targets: string[];
+  /** Optional: what must happen for the scenario test to pass. If absent, the scorer uses `behaviour`. */
+  pass?: string;
 }
 
 export interface Drill {
@@ -56,6 +58,16 @@ export interface Level {
   lessons: string[];
 }
 
+/** A button the trainee can press during a call, like a tool in the real system. */
+export interface Action {
+  id: string;
+  label: string;
+  /** How the action appears in the transcript the scorer reads. */
+  log: string;
+  /** If set, the guest notices this (e.g. a text arriving); otherwise the guest knows only what the agent says. */
+  guestSees?: string;
+}
+
 export interface Pack {
   id: string;
   name: string;
@@ -70,6 +82,12 @@ export interface Pack {
   dailyGoal: number;
   knowledgeBase?: Record<string, string>;
   criteria: Criterion[];
+  /** Rules that fail the call outright if missed (score capped below the pass mark). */
+  critical: string[];
+  /** Outcomes the trainee can pick in the wrap-up. */
+  outcomes: { id: string; label: string }[];
+  /** System actions available during calls. "check_rate" reveals rates; "find_booking" reveals the booking. */
+  actions: Action[];
   levels: Level[];
   roleplays: Roleplay[];
   drills: Drill[];

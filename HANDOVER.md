@@ -18,6 +18,16 @@
 - **Team dashboard:** a card per track (trainees, practised today, 7-day average, sessions), then the selected track's KPIs, performance bars, attendance grid and people.
 - **Support facts are practice values** until the support knowledge base is supplied. Replace the `kb` values in `support.ts` with approved answers.
 
+## Version 4 (role plays work like the playbook's test calls)
+Built to match `02_Roleplay_Test_Library.md` (Always-pass checks, a pass test per role play, one outcome + a summary per call).
+- **System buttons during calls** (`actions` in each pack). Sales: Check live rate, Text secure booking link, Create task, Transfer. Support: Open booking, Check live rate, Text secure payment link, Email confirmation, Log task, Escalate to duty manager. Rates stay hidden until **Check live rate** is pressed, and the booking until **Open booking**. A link only reaches the AI guest if the button was pressed. If the agent says "I've sent it" without pressing, the guest says nothing arrived.
+- **Hidden test scoring.** The scorer now sees the scenario's hidden `behaviour` (and an optional `pass` line per role play) and returns `test_passed`.
+- **Automatic fails.** If any `critical` rule is missed, the scenario test fails, or a price is said before Check live rate, the score is capped at pass mark − 15. Sales critical rules: no card, live prices, no freebies, right person. Support: no card, verification, resolution, escalation.
+- **Wrap-up.** After each call the trainee picks one outcome (`outcomes` in the pack) and writes a two-sentence note. This is scored as the new **Wrap-up notes** rule.
+- **Measured facts.** Turns over 25 words, stacked questions and actions used are counted in code (not by the AI) and shown in feedback.
+- **Tamper check.** Every AI guest line is signed (HMAC) by the backend, and `assess` rejects transcripts where the guest's side was edited.
+- **Storage.** The new `attempts.checks` column (migration `20261113000000_v3_checks.sql`) holds fails, the test result, the wrap-up, metrics and the uncapped score.
+
 ## 1. At a glance
 
 | What | Where |

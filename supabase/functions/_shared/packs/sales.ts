@@ -38,6 +38,26 @@ const pack: Pack = {
     { id: "next_step", label: "Next step", tip: "Never leave a call without a next step: booked, link sent, or callback time agreed." },
     { id: "close", label: "Close", tip: "Ask \"Is there anything else I can help with?\" before ending." },
     { id: "clarity", label: "Clarity & tone", tip: "Short turns, one question at a time, warm British English. No \"awesome\" or \"reach out\"." },
+    { id: "wrap_up", label: "Wrap-up notes", tip: "After the call, pick the one right outcome and write a two-sentence summary the team can act on." },
+  ],
+  // Always-pass checks (Shared Library): missing any of these fails the call, whatever the score.
+  critical: ["no_card", "live_price", "no_freebies", "identity"],
+  outcomes: [
+    { id: "booked", label: "Booked" },
+    { id: "link-sent", label: "Secure link sent" },
+    { id: "callback-scheduled", label: "Callback agreed" },
+    { id: "transferred", label: "Transferred to reception" },
+    { id: "task-created", label: "Task for reception" },
+    { id: "not-interested", label: "Not interested" },
+    { id: "do-not-call", label: "Do not call again" },
+    { id: "wrong-number", label: "Wrong number" },
+    { id: "no-outcome", label: "No outcome" },
+  ],
+  actions: [
+    { id: "check_rate", label: "Check live rate", log: "Ran check_rate: the live rate panel is now on screen" },
+    { id: "send_link", label: "Text secure booking link", log: "Sent the secure booking link by text", guestSees: "A text from the hotel has just arrived on your phone with a secure booking link." },
+    { id: "create_task", label: "Create task for reception", log: "Created a task for reception" },
+    { id: "transfer", label: "Transfer to reception", log: "Transferred the call to reception" },
   ],
   roleplays: [
     {
