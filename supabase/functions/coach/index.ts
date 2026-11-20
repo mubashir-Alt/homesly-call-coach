@@ -194,7 +194,7 @@ async function createDrillVariant(admin: SupabaseClient, pack: Pack, t: Drill, u
 Situation: ${t.title}. Original guest line: ${t.guest}
 What went wrong on the real call: ${t.was}
 Trainee's task: ${t.task}
-Keep the same underlying situation and the same test, but change the wording, the guest's circumstances and the Homesly hotel (e.g. Coach House Otterburn, Station Hotel Portsoy, Central Hotel Gloucester, George Hotel Montrose, County Hotel Selkirk, Hampton Hotel Wells, Park Hotel, The Woodman Inn, Homesly Guestrooms Berwick). If the task names a specific fact (a date, a rate's terms), keep that fact unchanged.
+Keep the same underlying situation and the same test, but change the wording, the guest's circumstances and the Homesly hotel (e.g. Coach House Otterburn, Station Hotel Portsoy, Central Hotel Gloucester, George Hotel Montrose, County Hotel Selkirk, Hampton Hotel Wells, Park Hotel, The Woodman Inn, Homesly Guestrooms Berwick). If the task names a specific fact (a date, a rate's terms), keep that fact unchanged. IMPORTANT: if the task names a hotel, a town or a person, the scene and guest line must use exactly that hotel, town and person (the trainee is marked against the task), and only vary everything else.
 Lines already used (do not repeat or closely copy): ${used.slice(0, 20).map((x) => `"${x}"`).join("; ") || "none yet"}
 Return guest_line (what the guest says, under 35 words, spoken words only) and context (one sentence setting the scene for the trainee, under 25 words).`,
       { type: "object", additionalProperties: false, required: ["guest_line", "context"], properties: { guest_line: { type: "string" }, context: { type: "string" } } },
