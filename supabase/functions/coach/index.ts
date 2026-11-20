@@ -13,7 +13,8 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import sales from "../_shared/packs/sales.ts";
 import support from "../_shared/packs/support.ts";
-import type { Drill, Pack, Rate, Roleplay } from "../_shared/types.ts";
+import HOTELS from "../_shared/hotels.ts";
+import type { Drill, Hotel, Pack, Rate, Roleplay } from "../_shared/types.ts";
 
 const PACKS: Record<string, Pack> = { sales, support };
 const MODEL = Deno.env.get("COACH_MODEL") || "claude-opus-5-5";
@@ -68,9 +69,49 @@ function bookingLines(t: Roleplay, v: CallVariant, today: string): string[] {
 }
 
 type CallVariant = {
-  kind: "call"; ref?: string; name: string; arrive: number; rates: Rate[]; personaDetail: string; twist: string; firstLine: string;
+  kind: "call"; ref?: string; hotelId?: string; questions?: Question[]; name: string; arrive: number; rates: Rate[]; personaDetail: string; twist: string; firstLine: string;
 };
-type DrillVariant = { kind: "drill"; guestLine: string; context: string };
+type DrillVariant = { kind: "drill"; guestLine: string; context: string; kb?: string[]; answerKey?: string };
+/** A question the AI guest is set to ask. answer = the KB answer, or null when the KB doesn't cover it. */
+type Question = { topic: string; q: string; answer: string | null };
+
+/* ---------- Hotel knowledge bases ---------- */
+const hotelById = (id?: string): Hotel | undefined => HOTELS.find((h) => h.id === id);
+const shuffle = <T,>(xs: T[]) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+/** Hotel name and town for this trainee's call. */
+function where(t: Roleplay, v: { hotelId?: string }) { const h = hotelById(v.hotelId); return h ? { hotel: h.name, town: h.town } : { hotel: t.hotel, town: t.town }; }
+const placeText = (t: Roleplay, v: { hotelId?: string }) => { const w = where(t, v); return w.hotel + (w.town ? ", " + w.town : ""); };
+/** Everything the agent can look up: the hotel's KB, staff notes, then the scenario's own policy lines (which win). */
+function kbFor(t: Roleplay, v: { hotelId?: string }): Record<string, string> {
+  const h = hotelById(v.hotelId);
+  const out: Record<string, string> = {};
+  if (h) {
+    for (const f of h.facts) out[f.topic] = f.answer;
+    h.cautions.forEach((c, i) => (out[`Staff note ${i + 1}`] = c));
+  }
+  return { ...out, ...t.kb };
+}
+/** Pick a hotel and this trainee's own questions, avoiding combinations colleagues already had. */
+function pickHotelAndQuestions(t: Roleplay, usedSigs: Set<string>): { hotelId?: string; questions: Question[]; key: string } {
+  if (!t.hotelId) return { questions: [], key: "" };
+  let best = { hotelId: t.hotelId, questions: [] as Question[], key: "" };
+  for (let i = 0; i < 30; i++) {
+    const h = t.hotelId === "*" ? pick(HOTELS) : hotelById(t.hotelId);
+    if (!h) break;
+    const want = (t.ask?.topics ?? []).map((x) => x.toLowerCase());
+    const pref = h.facts.filter((f) => want.some((w) => f.topic.toLowerCase().includes(w) || f.q.toLowerCase().includes(w)));
+    const rest = h.facts.filter((f) => !pref.includes(f));
+    const nf = t.ask?.facts ?? 0, ng = t.ask?.gaps ?? 0;
+    // Mostly the scenario's topics, plus one wildcard so no two calls feel the same.
+    const facts = [...shuffle(pref).slice(0, Math.max(0, nf - 1)), ...shuffle(rest)].slice(0, nf);
+    const gaps = shuffle(h.gaps.filter((g) => !Object.keys(t.kb).some((k) => k.toLowerCase() === g.topic.toLowerCase()))).slice(0, ng);
+    const questions: Question[] = shuffle([...facts.map((f) => ({ topic: f.topic, q: f.q, answer: f.answer })), ...gaps.map((g) => ({ topic: g.topic, q: g.q, answer: null }))]);
+    const key = `${h.id}|${questions.map((q) => q.topic).sort().join(",")}`;
+    best = { hotelId: h.id, questions, key };
+    if (![...usedSigs].some((u) => u.startsWith(key + "|"))) break;
+  }
+  return best;
+}
 
 function findLesson(pack: Pack, id: string): { kind: "call"; t: Roleplay } | { kind: "drill"; t: Drill } {
   const r = pack.roleplays.find((x) => x.id === id);
@@ -86,13 +127,13 @@ async function publicCall(t: Roleplay, v: CallVariant, today: string, id: string
   const a = addDays(today, v.arrive), d = addDays(today, v.arrive + t.nights);
   return {
     firstSig: await sign(id, v.firstLine),
-    variantId: id, kind: "call", lessonId: t.id, title: t.title, scenario: t.scenario, hotel: t.hotel, town: t.town, dir: t.dir, voice: t.voice,
+    variantId: id, kind: "call", lessonId: t.id, title: t.title, scenario: t.scenario, ...where(t, v), purpose: t.purpose ?? "", dir: t.dir, voice: t.voice,
     guest: guestName(t, v.name), persona: fill(t.persona, v.name), from: t.from, situation: t.situation ?? "", booking: bookingLines(t, v, today), nights: t.nights, adults: t.adults, children: t.children,
-    arriveText: t.nights ? longDate(a) : "", departText: t.nights ? longDate(d) : "", rates: v.rates, kb: t.kb, targets: t.targets, firstLine: v.firstLine,
+    arriveText: t.nights ? longDate(a) : "", departText: t.nights ? longDate(d) : "", rates: v.rates, kb: kbFor(t, v), targets: t.targets, firstLine: v.firstLine,
   };
 }
 function publicDrill(t: Drill, v: DrillVariant, id: string) {
-  return { variantId: id, kind: "drill", lessonId: t.id, title: t.title, from: t.from, guestLine: v.guestLine, context: v.context, was: t.was, task: t.task, targets: t.targets };
+  return { variantId: id, kind: "drill", lessonId: t.id, title: t.title, from: t.from, guestLine: v.guestLine, context: v.context, kb: v.kb ?? [], was: t.was, task: t.task, targets: t.targets };
 }
 
 async function createCallVariant(admin: SupabaseClient, pack: Pack, t: Roleplay, userId: string): Promise<{ id: string; data: CallVariant }> {
@@ -100,12 +141,15 @@ async function createCallVariant(admin: SupabaseClient, pack: Pack, t: Roleplay,
   const used = new Set((prev ?? []).map((p) => p.signature));
   const recentTwists = (prev ?? []).slice(0, 15).map((p) => (p.data as CallVariant).twist).filter(Boolean);
   const gender = t.nameGender ?? t.voice;
+  const hq = pickHotelAndQuestions(t, used);
+  const pre = hq.key ? hq.key + "|" : "";
   let name = "", arrive = t.arrive;
   for (let i = 0; i < 40; i++) {
     name = `${pick(gender === "male" ? MALE : FEMALE)} ${pick(SURNAMES)}`;
     arrive = t.fixedDates || !t.nights ? t.arrive : Math.max(1, t.arrive + Math.floor(Math.random() * 15) - 5);
-    if (!used.has(`${name}|${arrive}`)) break;
+    if (!used.has(`${pre}${name}|${arrive}`)) break;
   }
+  const vh = { hotelId: hq.hotelId };
   const rates = t.rates.map((r) => ({ ...r, perNight: Math.round(r.perNight * (0.9 + Math.random() * 0.2)) }));
   const a = addDays(ukToday(), arrive);
   type Gen = { persona_detail: string; twist: string; first_line: string };
@@ -113,12 +157,12 @@ async function createCallVariant(admin: SupabaseClient, pack: Pack, t: Roleplay,
     `You write realistic, varied practice-call scenarios for hotel ${role(pack)} training in the UK. Plain British English.`,
     `Create a fresh variation of this practice call so that no two trainees get the same call.
 
-Scenario: ${t.title} (${t.scenario}). Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}.
+Scenario: ${t.title} (${t.scenario}). Hotel: ${placeText(t, vh)}.
 Direction: ${t.dir === "out" ? "the hotel agent phones this person" : "this person phones the hotel"}.${t.situation ? "\nWhat the call is about: " + t.situation : ""}
 Person: ${guestName(t, name)}. ${fill(t.persona, name)}
 Core behaviour that must stay true: ${fill(t.behaviour, name)}
 ${t.nights ? `Stay: arriving ${longDate(a)} for ${t.nights} night(s), ${t.adults} adult(s)${t.children.length ? ", children aged " + t.children.join(", ") : ""}.` : ""}
-Twists already used for other trainees (do not repeat or closely copy): ${recentTwists.length ? recentTwists.map((x) => `"${x}"`).join("; ") : "none yet"}
+${hq.questions.length ? "Questions this person will ask during the call (don't put them in the first line): " + hq.questions.map((q) => q.q).join(" | ") + "\n" : ""}Twists already used for other trainees (do not repeat or closely copy): ${recentTwists.length ? recentTwists.map((x) => `"${x}"`).join("; ") : "none yet"}
 
 Return:
 - persona_detail: one new, specific, realistic detail about the person (under 20 words), e.g. job, reason for travel, mood.
@@ -127,9 +171,9 @@ Return:
     { type: "object", additionalProperties: false, required: ["persona_detail", "twist", "first_line"], properties: { persona_detail: { type: "string" }, twist: { type: "string" }, first_line: { type: "string" } } },
     "low",
   );
-  const data: CallVariant = { kind: "call", ref: t.booking ? `HS-${Math.floor(10000 + Math.random() * 90000)}` : undefined, name, arrive, rates, personaDetail: gen.persona_detail, twist: gen.twist, firstLine: gen.first_line.replace(/^["']|["']$/g, "") };
+  const data: CallVariant = { kind: "call", ref: t.booking ? `HS-${Math.floor(10000 + Math.random() * 90000)}` : undefined, hotelId: hq.hotelId, questions: hq.questions, name, arrive, rates, personaDetail: gen.persona_detail, twist: gen.twist, firstLine: gen.first_line.replace(/^["']|["']$/g, "") };
   for (let i = 0; i < 3; i++) {
-    const sig = i === 0 ? `${name}|${arrive}` : `${name}|${arrive}|${crypto.randomUUID().slice(0, 6)}`;
+    const sig = i === 0 ? `${pre}${name}|${arrive}` : `${pre}${name}|${arrive}|${crypto.randomUUID().slice(0, 6)}`;
     const { data: row, error } = await admin.from("scenario_variants").insert({ pack: pack.id, lesson_id: t.id, kind: "call", user_id: userId, signature: sig, data }).select("id").single();
     if (!error && row) return { id: row.id, data };
   }
@@ -141,6 +185,7 @@ async function createDrillVariant(admin: SupabaseClient, pack: Pack, t: Drill, u
   const used = (prev ?? []).map((p) => (p.data as DrillVariant).guestLine).filter(Boolean);
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const usedSet = new Set(used.map(norm));
+  if (t.kbQuiz) return createKbDrill(admin, pack, t, userId, usedSet, norm);
   for (let attempt = 0; attempt < 3; attempt++) {
     type Gen = { guest_line: string; context: string };
     const gen = await askJson<Gen>(
@@ -158,6 +203,31 @@ Return guest_line (what the guest says, under 35 words, spoken words only) and c
     const data: DrillVariant = { kind: "drill", guestLine: gen.guest_line.replace(/^["']|["']$/g, ""), context: gen.context };
     const sig = norm(data.guestLine).slice(0, 180);
     if (usedSet.has(sig)) continue;
+    const { data: row, error } = await admin.from("scenario_variants").insert({ pack: pack.id, lesson_id: t.id, kind: "drill", user_id: userId, signature: sig, data }).select("id").single();
+    if (!error && row) return { id: row.id, data };
+  }
+  throw new HttpError(500, "Could not create a new version of this drill. Try again.");
+}
+
+/** A drill built from a random hotel's knowledge base: the trainee answers from the facts shown, or says they'll check. */
+async function createKbDrill(admin: SupabaseClient, pack: Pack, t: Drill, userId: string, usedSet: Set<string>, norm: (s: string) => string): Promise<{ id: string; data: DrillVariant }> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const h = pick(HOTELS);
+    const target = t.kbQuiz === "gap" ? pick(h.gaps) : pick(h.facts);
+    const sigBase = `${h.id}|${target.topic}`;
+    if (attempt < 5 && [...usedSet].some((u) => u.startsWith(norm(sigBase)))) continue;
+    const others = shuffle(h.facts.filter((f) => f.topic !== target.topic)).slice(0, t.kbQuiz === "gap" ? 6 : 5);
+    const kb = shuffle(t.kbQuiz === "gap" ? others : [...others, target as Hotel["facts"][number]]).map((f) => `${f.topic}: ${(f as Hotel["facts"][number]).answer}`);
+    type Gen = { guest_line: string };
+    const gen = await askJson<Gen>(`You write realistic guest lines for hotel ${role(pack)} training in the UK. Plain British English.`,
+      `A guest staying at ${h.name}, ${h.town} is on the phone with the hotel's support agent. Write what the guest says to ask this, in their own words with a small personal reason (under 30 words, spoken words only): "${target.q}"`,
+      { type: "object", additionalProperties: false, required: ["guest_line"], properties: { guest_line: { type: "string" } } }, "low");
+    const data: DrillVariant = {
+      kind: "drill", guestLine: gen.guest_line.replace(/^["']|["']$/g, ""),
+      context: `You're on the phone with a guest booked at ${h.name}, ${h.town}. Below is what the knowledge base shows you.`,
+      kb, answerKey: t.kbQuiz === "gap" ? `Not in the knowledge base (${target.topic}). The right move: don't guess; say you'll check with the team and call or text back by a set time.` : `${target.topic}: ${(target as Hotel["facts"][number]).answer}`,
+    };
+    const sig = norm(`${sigBase} ${data.guestLine}`).slice(0, 180);
     const { data: row, error } = await admin.from("scenario_variants").insert({ pack: pack.id, lesson_id: t.id, kind: "drill", user_id: userId, signature: sig, data }).select("id").single();
     if (!error && row) return { id: row.id, data };
   }
@@ -248,13 +318,13 @@ function guestSystem(pack: Pack, t: Roleplay, v: CallVariant, today: string): st
     : `INBOUND. ${t.situation ? t.situation + " " : ""}You called the hotel and have already said your opening line.`;
   return `You are role-playing a phone call to train a hotel ${role(pack)} at Homesly, a group of independent UK hotels. You play the OTHER PERSON on the call and stay fully in character.
 
-Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}.
+Hotel: ${placeText(t, v)}.
 Call type: ${type}
 Your name: ${guestName(t, v.name)}.
 Who you are: ${fill(t.persona, v.name)} ${v.personaDetail}
 ${stay}
 How you behave: ${fill(t.behaviour, v.name)}
-Extra detail for this call: ${v.twist}
+Extra detail for this call: ${v.twist}${v.questions?.length ? "\nQuestions you want answered on this call (ask them in your own words, one at a time, when it feels natural; you don't know the answers, so accept what the agent tells you): " + v.questions.map((q, i) => `${i + 1}) ${q.q}`).join(" ") : ""}
 Today is ${longDate(addDays(today, 0))}.
 
 How to reply:
@@ -295,14 +365,14 @@ function assessPrompt(pack: Pack, t: Roleplay, v: CallVariant, turns: Turn[], to
   const hasRate = pack.actions.some((a) => a.id === "check_rate") && t.rates.length > 0;
   return `Score this practice call.
 
-SCENARIO: ${t.scenario}: "${t.title}". Hotel: ${t.hotel}${t.town ? ", " + t.town : ""}. ${t.dir === "out" ? "Outbound: the agent called the guest (the guest answered first)." : "Inbound: the person called the hotel and spoke first."}
+SCENARIO: ${t.scenario}: "${t.title}". Hotel: ${placeText(t, v)}.${t.purpose ? " Purpose of the call: " + t.purpose : ""} ${t.dir === "out" ? "Outbound: the agent called the guest (the guest answered first)." : "Inbound: the person called the hotel and spoke first."}
 Person on the call: ${guestName(t, v.name)}. ${fill(t.persona, v.name)} ${v.personaDetail} Extra detail: ${v.twist}
 
 WHAT THE AGENT COULD SEE ON SCREEN (the only prices and facts they may use):
 ${t.booking ? "Booking system:\n" + bookingLines(t, v, today).join("\n") + "\n" : ""}Live rate (check_rate result):
 ${rateLines(t, v, today).join("\n")}
 Knowledge base:
-${Object.entries(t.kb).map(([k, val]) => `${k}: ${val}`).join("\n") || "(nothing)"}
+${Object.entries(kbFor(t, v)).map(([k, val]) => `${k}: ${val}`).join("\n") || "(nothing)"}
 Anything marked "Not in knowledge base" must not be answered from memory; the right move is "I'll check that with the team and text you back".
 ${hasRate ? "The live rate panel was hidden until the agent ran check_rate (shown as a SYSTEM line). Any price said before that line was from memory." : ""}
 SYSTEM lines are real actions the agent took in the system (e.g. a text actually sent). Saying "I've sent you a link" without a matching SYSTEM line means nothing was sent.
@@ -310,6 +380,8 @@ SYSTEM lines are real actions the agent took in the system (e.g. a text actually
 THE HIDDEN TEST OF THIS SCENARIO (the guest was told to behave like this; the agent could not see it):
 ${fill(t.behaviour, v.name)}
 ${t.pass ? "To pass the test: " + t.pass : "Work out what the right handling of this test is from the rules and the scenario."}
+${v.questions?.length ? `The guest was also set these questions. Each answer must match the knowledge base; for one the knowledge base doesn't cover, the agent must not guess and should promise to check and come back by a set time. A wrong fact, a guess, or a promise the staff notes forbid is "missed" for kb_facts and fails the test. A question the guest never got to ask doesn't count against the agent.
+${v.questions.map((q) => `- "${q.q}" -> ${q.answer ?? "NOT IN KNOWLEDGE BASE"}`).join("\n")}` : ""}
 
 RULES (score each one):
 ${pack.criteria.map((c) => `- ${c.id}: ${c.tip}`).join("\n")}
@@ -476,7 +548,7 @@ Deno.serve(async (req) => {
         await bumpUsage(admin, user.id, today);
         const d = lesson.t, v = row.data as DrillVariant;
         const prompt = `A trainee is practising one moment based on a real recorded call.
-Scene: ${v.context}
+Scene: ${v.context}${v.kb?.length ? "\nKnowledge base shown to the trainee:\n" + v.kb.join("\n") : ""}${v.answerKey ? "\nCorrect answer: " + v.answerKey + "\nA wrong or guessed fact scores under 40." : ""}
 What the guest says: "${v.guestLine}"
 What went wrong on the original real call: ${d.was}
 Task: ${d.task}

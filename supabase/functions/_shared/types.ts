@@ -30,6 +30,12 @@ export interface Roleplay {
   booking?: Record<string, string>;
   /** What the call is about, for the AI guest (replaces the default abandoned-booking context). */
   situation?: string;
+  /** Use a hotel knowledge base (`hotels.ts`): a hotel id, or "*" for a different random hotel per trainee. Overrides hotel/town. */
+  hotelId?: string;
+  /** What the trainee is told about why they're making / taking this call. */
+  purpose?: string;
+  /** Questions the guest asks, drawn per trainee from the hotel knowledge base: facts it answers, gaps it doesn't. */
+  ask?: { facts: number; gaps: number; topics?: string[] };
   /** "{name}" is replaced with the generated name. */
   persona: string;
   /** Hidden from trainees. Only the AI guest sees this. "{name}" is replaced. */
@@ -41,6 +47,8 @@ export interface Roleplay {
 
 export interface Drill {
   id: string;
+  /** Knowledge-base quiz: the guest asks a question from a random hotel's KB ("fact") or one it doesn't answer ("gap"). */
+  kbQuiz?: "fact" | "gap";
   title: string;
   from: string;
   guest: string;
@@ -91,4 +99,16 @@ export interface Pack {
   levels: Level[];
   roleplays: Roleplay[];
   drills: Drill[];
+}
+
+/** A hotel's knowledge base, built from the hotel documents. */
+export interface Hotel {
+  id: string;
+  name: string;
+  town: string;
+  contact: string;
+  facts: { topic: string; answer: string; q: string }[];
+  /** Common guest questions this KB does not answer. */
+  gaps: { topic: string; q: string }[];
+  cautions: string[];
 }

@@ -18,6 +18,43 @@
 - **Team dashboard:** a card per track (trainees, practised today, 7-day average, sessions), then the selected track's KPIs, performance bars, attendance grid and people.
 - **Support facts are practice values** until the support knowledge base is supplied. Replace the `kb` values in `support.ts` with approved answers.
 
+## Version 5 (support course from the hotel knowledge bases, outbound calls)
+- **Real hotel facts.** `supabase/functions/_shared/hotels.ts` holds 8 hotel knowledge bases built from the Nov 2026 documents: Station Portsoy, Central Gloucester, Hampton Llandrindod Wells, Homesly Guest Rooms Berwick, George Montrose, Coach House Otterburn, Woodman Inn Bedale and County Selkirk. Each has:
+  - facts: the topic, the approved answer, and how a guest asks it;
+  - gaps: common questions the KB does not answer;
+  - staff cautions.
+- **Support calls are outbound.** The agent phones the guest:
+  - pre-arrival;
+  - date-change callback;
+  - late check-out;
+  - deposit callback;
+  - failed payment;
+  - heating follow-up;
+  - travel disruption;
+  - noise follow-up;
+  - complaint callbacks;
+  - fire closure (bad-news script);
+  - lost property.
+
+  `purpose` is what the trainee sees. `situation` and `behaviour` are hidden and only the AI guest sees them.
+- **Different for everyone.**
+  - `hotelId: "*"` gives each trainee a random hotel.
+  - `ask` draws that trainee's own guest questions from it: `facts` the KB answers plus `gaps` it doesn't.
+  - The hotel and the set of questions are part of the variant signature, so colleagues get different combinations.
+  - Names, dates, prices, persona and twist still vary as before.
+- **Scoring against the KB.** The scorer gets each question with its correct KB answer, or "not in KB". Each of these is "missed" for Facts from KB, which is now a critical rule for support (an automatic fail):
+  - a wrong fact;
+  - a guess;
+  - a promise that a staff caution rules out.
+- **KB drills.** SD13 (answer from the KB) and SD14 (it isn't in the KB) each pick a random hotel and question per trainee, and show an extract from the KB. The answer key stays on the server.
+- **Issues found in the documents** (worth fixing at source):
+  - Central Gloucester: the phone number looks malformed and the email is a gmail address.
+  - Homesly Berwick: check-out says 10:00 PM.
+  - Hampton: says 22 rooms but lists 24; no phone number or Wi-Fi password.
+  - Station Portsoy: Thursday–Saturday bar closing times are ambiguous.
+  - County Selkirk: the phone number is written as "+44 0330".
+  - George Montrose: the old and new guides conflict; the newer one was used.
+
 ## Version 4 (role plays work like the playbook's test calls)
 Built to match `02_Roleplay_Test_Library.md` (Always-pass checks, a pass test per role play, one outcome + a summary per call).
 - **System buttons during calls** (`actions` in each pack). Sales: Check live rate, Text secure booking link, Create task, Transfer. Support: Open booking, Check live rate, Text secure payment link, Email confirmation, Log task, Escalate to duty manager. Rates stay hidden until **Check live rate** is pressed, and the booking until **Open booking**. A link only reaches the AI guest if the button was pressed. If the agent says "I've sent it" without pressing, the guest says nothing arrived.
